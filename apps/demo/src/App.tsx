@@ -45,6 +45,9 @@ const READ_BILLBOARD = {
   scale: 1.1,
 } as const;
 
+/** Default demo camera; `lookAt` is origin — distance scales dolly in/out. */
+const BASE_CAMERA: [number, number, number] = [0, 6.4, 7.2];
+
 function cardScaleById(id: string): number {
   if (id.startsWith("c-deck-")) {
     return 1;
@@ -88,6 +91,29 @@ export function App() {
   const [readSnapshot, setReadSnapshot] = useState<ReadSnapshot | null>(null);
   const [readFlightKey, setReadFlightKey] = useState(0);
   const [shadowsOn, setShadowsOn] = useState(true);
+  /** 1 = default framing; <1 closer (zoom in), >1 further (zoom out). */
+  const [cameraDistance, setCameraDistance] = useState(1);
+  const cameraPosition = useMemo(
+    (): [number, number, number] => [
+      BASE_CAMERA[0]! * cameraDistance,
+      BASE_CAMERA[1]! * cameraDistance,
+      BASE_CAMERA[2]! * cameraDistance,
+    ],
+    [cameraDistance]
+  );
+  /** Table plane tilt in degrees (applied to `Playmat` root). */
+  const [tiltPitchDeg, setTiltPitchDeg] = useState(0);
+  const [tiltYawDeg, setTiltYawDeg] = useState(0);
+  const [tiltRollDeg, setTiltRollDeg] = useState(0);
+  const tableTilt = useMemo(
+    () =>
+      [
+        (tiltPitchDeg * Math.PI) / 180,
+        (tiltYawDeg * Math.PI) / 180,
+        (tiltRollDeg * Math.PI) / 180,
+      ] as [number, number, number],
+    [tiltPitchDeg, tiltYawDeg, tiltRollDeg]
+  );
   const battlefieldGroupRef = useRef<Group>(null);
   const cardGroupById = useRef(new Map<string, Group>());
   const readCaptureGate = useRef(false);
@@ -342,12 +368,13 @@ export function App() {
   return (
     <>
       <TCGLCanvas events={events} shadows={shadowsOn} style={{ height: "100vh" }}>
-        <CameraRig position={[0, 6.4, 7.2]} fov={40} />
+        <CameraRig position={cameraPosition} fov={40} />
         <LightingRig />
 
         <Playmat
           size={[16, 14]}
           y={0}
+          tilt={tableTilt}
           splitSides={{ near: "#55555d", far: "#65656d" }}
           showCenterSeam
         >
@@ -556,6 +583,81 @@ export function App() {
             />
             <span>Shadows</span>
           </label>
+        </p>
+        <p style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 360 }}>
+          <span style={{ opacity: 0.85 }}>Zoom: camera distance (same view angle toward table center)</span>
+          <label
+            style={{ display: "grid", gridTemplateColumns: "88px 1fr 40px", alignItems: "center", gap: 6 }}
+          >
+            <span>Distance</span>
+            <input
+              type="range"
+              min={0.55}
+              max={1.45}
+              step={0.01}
+              value={cameraDistance}
+              onChange={(e) => setCameraDistance(Number(e.target.value))}
+            />
+            <span style={{ textAlign: "right" }}>×{cameraDistance.toFixed(2)}</span>
+          </label>
+          <button type="button" onClick={() => setCameraDistance(1)}>
+            Reset zoom
+          </button>
+        </p>
+        <p style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 360 }}>
+          <span style={{ opacity: 0.85 }}>Table tilt (°): tip the whole playmat in world space</span>
+          <label
+            style={{ display: "grid", gridTemplateColumns: "88px 1fr 32px", alignItems: "center", gap: 6 }}
+          >
+            <span>Pitch</span>
+            <input
+              type="range"
+              min={-25}
+              max={25}
+              step={0.5}
+              value={tiltPitchDeg}
+              onChange={(e) => setTiltPitchDeg(Number(e.target.value))}
+            />
+            <span style={{ textAlign: "right" }}>{tiltPitchDeg.toFixed(1)}</span>
+          </label>
+          <label
+            style={{ display: "grid", gridTemplateColumns: "88px 1fr 32px", alignItems: "center", gap: 6 }}
+          >
+            <span>Yaw</span>
+            <input
+              type="range"
+              min={-60}
+              max={60}
+              step={0.5}
+              value={tiltYawDeg}
+              onChange={(e) => setTiltYawDeg(Number(e.target.value))}
+            />
+            <span style={{ textAlign: "right" }}>{tiltYawDeg.toFixed(1)}</span>
+          </label>
+          <label
+            style={{ display: "grid", gridTemplateColumns: "88px 1fr 32px", alignItems: "center", gap: 6 }}
+          >
+            <span>Roll</span>
+            <input
+              type="range"
+              min={-25}
+              max={25}
+              step={0.5}
+              value={tiltRollDeg}
+              onChange={(e) => setTiltRollDeg(Number(e.target.value))}
+            />
+            <span style={{ textAlign: "right" }}>{tiltRollDeg.toFixed(1)}</span>
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setTiltPitchDeg(0);
+              setTiltYawDeg(0);
+              setTiltRollDeg(0);
+            }}
+          >
+            Reset table
+          </button>
         </p>
         <p>
           <strong>TCGL v0</strong> — presentation + interaction. Hover, tilt, click/double-click,

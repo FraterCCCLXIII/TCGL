@@ -15,8 +15,13 @@ export type PlaymatProps = {
   showZoneGuides?: boolean;
   /** Soft contact-style shadows for objects above the mat (drei `ContactShadows`). @default true */
   contactShadows?: boolean;
+  /**
+   * World-space Euler rotation of the playmat **root** (radians, `[x, y, z]` = pitch / yaw / roll).
+   * Tips the table surface and all children together. @default [0, 0, 0]
+   */
+  tilt?: [number, number, number];
 } & Omit<R3FGroupProps, "position"> & {
-    position?: R3FGroupProps["position"];
+  position?: R3FGroupProps["position"];
   };
 
 /**
@@ -32,6 +37,7 @@ export function Playmat({
   showCenterSeam = true,
   showZoneGuides = false,
   contactShadows = true,
+  tilt = [0, 0, 0] as [number, number, number],
   ...groupProps
 }: PlaymatProps) {
   const [w, d] = size;
@@ -58,7 +64,11 @@ export function Playmat({
   }, [d, w]);
 
   return (
-    <group position={[0, yNum, 0]} {...groupProps}>
+    <group
+      position={[0, yNum, 0]}
+      {...groupProps}
+      rotation={tilt as [number, number, number]}
+    >
       <group rotation={[-Math.PI / 2, 0, 0]}>
         {splitSides ? (
           <>
