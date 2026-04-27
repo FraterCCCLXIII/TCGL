@@ -28,6 +28,14 @@ body,
   pointer-events: none;
 }
 
+/* Let controls in the HUD receive clicks (parent uses none so the 3D canvas keeps pointer events). */
+.hud label,
+.hud input,
+.hud button,
+.hud select {
+  pointer-events: auto;
+}
+
 .hud p {
   margin: 0.15rem 0;
 }

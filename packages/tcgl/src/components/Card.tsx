@@ -17,7 +17,7 @@ import {
   SRGBColorSpace,
   type Texture,
 } from "three";
-import { useTCGLEvents } from "../context/TCGLContext";
+import { useTCGL, useTCGLEvents } from "../context/TCGLContext";
 import { DEFAULT_CARD_H, DEFAULT_CARD_W } from "../constants/dimensions";
 import { createRoundedCardAlphaMap } from "../utils/roundedCardAlphaMap";
 import { getCardRimWorldRadius } from "../utils/cardRimParams";
@@ -110,7 +110,9 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 }: CardProps,
   ref: Ref<Group>
 ) {
+  const { shadows: shadowsOn } = useTCGL();
   const events = useTCGLEvents();
+  const allowShadow = shadowsOn && !screenOverlay;
   const [hovered, setHovered] = useState(false);
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
   const prevFaceUp = useRef(faceUp);
@@ -356,9 +358,10 @@ export const Card = forwardRef<Group, CardProps>(function Card(
               onDoubleClick={onPointerDoubleClick}
             >
               <FlipRig rotation-y={flipR}>
+                {/* receiveShadow off: PCF shadow maps band on thin tilted quads (diagonal lines on art). */}
                 <mesh
-                  castShadow={!screenOverlay}
-                  receiveShadow={!screenOverlay}
+                  castShadow={allowShadow}
+                  receiveShadow={false}
                   frustumCulled={false}
                   position={[0, 0, 0.0002]}
                   renderOrder={2}
@@ -401,8 +404,8 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                   )}
                 </mesh>
                 <mesh
-                  castShadow={!screenOverlay}
-                  receiveShadow={!screenOverlay}
+                  castShadow={allowShadow}
+                  receiveShadow={false}
                   frustumCulled={false}
                   position={[0, 0, -0.0002]}
                   renderOrder={1}

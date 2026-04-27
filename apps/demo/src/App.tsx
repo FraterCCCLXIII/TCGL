@@ -87,6 +87,7 @@ export function App() {
   /** Set in useLayout once per read session from the on-table `Card` ref (world decompose). */
   const [readSnapshot, setReadSnapshot] = useState<ReadSnapshot | null>(null);
   const [readFlightKey, setReadFlightKey] = useState(0);
+  const [shadowsOn, setShadowsOn] = useState(true);
   const battlefieldGroupRef = useRef<Group>(null);
   const cardGroupById = useRef(new Map<string, Group>());
   const readCaptureGate = useRef(false);
@@ -340,7 +341,7 @@ export function App() {
 
   return (
     <>
-      <TCGLCanvas events={events} style={{ height: "100vh" }}>
+      <TCGLCanvas events={events} shadows={shadowsOn} style={{ height: "100vh" }}>
         <CameraRig position={[0, 6.4, 7.2]} fov={40} />
         <LightingRig />
 
@@ -546,6 +547,16 @@ export function App() {
       </TCGLCanvas>
 
       <div className="hud">
+        <p>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={shadowsOn}
+              onChange={(e) => setShadowsOn(e.target.checked)}
+            />
+            <span>Shadows</span>
+          </label>
+        </p>
         <p>
           <strong>TCGL v0</strong> — presentation + interaction. Hover, tilt, click/double-click,
           drag on the battlefield sample, <kbd>F</kbd> flips the selected card.

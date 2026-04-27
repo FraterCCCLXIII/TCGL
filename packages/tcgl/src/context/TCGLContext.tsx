@@ -4,6 +4,7 @@ import { noopCardEvents } from "../types";
 
 const defaultValue: TCGLContextValue = {
   events: noopCardEvents,
+  shadows: true,
 };
 
 const TCGLContext = createContext<TCGLContextValue>(defaultValue);
@@ -19,6 +20,7 @@ export function TCGLProvider({
     ...defaultValue,
     ...value,
     events: value.events,
+    shadows: value.shadows ?? defaultValue.shadows,
   };
   return (
     <TCGLContext.Provider value={merged}>{children}</TCGLContext.Provider>

@@ -75,6 +75,8 @@ export type ZoneKind =
 export type TCGLContextValue = {
   events: CardInteractionEvents;
   cardWidth?: number;
+  /** WebGL shadow maps and object shadow casting/receiving (from `TCGLCanvas` / `TCGLProvider`). */
+  shadows: boolean;
 };
 
 export type R3FGroupProps = ThreeElements["group"];

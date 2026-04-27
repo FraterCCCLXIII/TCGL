@@ -1,6 +1,7 @@
 import { ContactShadows, Line, MeshReflectorMaterial } from "@react-three/drei";
 import { type ReactNode, useMemo } from "react";
 import { Vector3 } from "three";
+import { useTCGL } from "../context/TCGLContext";
 import type { R3FGroupProps } from "../types";
 
 export type PlaymatProps = {
@@ -42,6 +43,8 @@ export function Playmat({
   );
   const yNum = y;
   const margin = 0.98;
+  const { shadows: shadowsOn } = useTCGL();
+  const showContact = contactShadows && shadowsOn;
   const guide = useMemo(() => {
     const hw = (w * margin) / 2;
     const hd = (d * margin) / 2;
@@ -59,7 +62,11 @@ export function Playmat({
       <group rotation={[-Math.PI / 2, 0, 0]}>
         {splitSides ? (
           <>
-            <mesh position={[-halfW / 2, 0, 0]} receiveShadow renderOrder={0}>
+            <mesh
+              position={[-halfW / 2, 0, 0]}
+              receiveShadow={shadowsOn}
+              renderOrder={0}
+            >
               <planeGeometry args={halfArgs} />
               <meshStandardMaterial
                 color={splitSides.near}
@@ -67,7 +74,11 @@ export function Playmat({
                 metalness={0.04}
               />
             </mesh>
-            <mesh position={[halfW / 2, 0, 0]} receiveShadow renderOrder={0}>
+            <mesh
+              position={[halfW / 2, 0, 0]}
+              receiveShadow={shadowsOn}
+              renderOrder={0}
+            >
               <planeGeometry args={halfArgs} />
               <meshStandardMaterial
                 color={splitSides.far}
@@ -87,7 +98,7 @@ export function Playmat({
             )}
           </>
         ) : reflector ? (
-          <mesh receiveShadow>
+          <mesh receiveShadow={shadowsOn}>
             <planeGeometry args={args} />
             <MeshReflectorMaterial
               color={color}
@@ -97,7 +108,7 @@ export function Playmat({
             />
           </mesh>
         ) : (
-          <mesh receiveShadow>
+          <mesh receiveShadow={shadowsOn}>
             <planeGeometry args={args} />
             <meshStandardMaterial color={color} roughness={0.9} metalness={0.05} />
           </mesh>
@@ -114,7 +125,7 @@ export function Playmat({
           />
         )}
       </group>
-      {contactShadows && (
+      {showContact && (
         <ContactShadows
           position={[0, 0.002, 0]}
           resolution={256}
