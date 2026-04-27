@@ -1,0 +1,25 @@
+{
+  "name": "@tcgl/game-mtg-lite",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Optional MTG-like rules extension points (triggers, replacements, layers) — minimal stubs; expand over time.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "peerDependencies": {
+    "@tcgl/core": "*"
+  },
+  "devDependencies": {
+    "@tcgl/core": "*",
+    "typescript": "^5.7.3"
+  }
+}

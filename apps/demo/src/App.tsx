@@ -15,7 +15,7 @@ import {
   CameraRig,
   Card,
   type CardVfxKind,
-  CardFan,
+  ReorderableCardFan,
   CardPile,
   CardStack,
   CardVfx,
@@ -31,12 +31,32 @@ import {
   TCGLCanvas,
 } from "tcgl";
 import { TablePlaneDrag } from "./TablePlaneDrag";
-
-const BASE = "/cards";
-const face = (n: number) => `${BASE}/face-${n}.png`;
-const BACK = `${BASE}/back.png`;
-
-const DRAG_CARD_ID = "c-bf-2";
+import {
+  advanceStepAction,
+  castToStackAction,
+  endTurnAction,
+  moveCardAction,
+  passPriorityAction,
+  reorderZoneCardsAction,
+} from "@tcgl/core";
+import { demoZones } from "./engine/seedDemoGame";
+import { useDemoSession } from "./engine/useDemoSession";
+import {
+  allOnTableCardIds,
+  getBattlefieldIds,
+  getGraveyardIds,
+  getHandIds,
+  getStack3dIds,
+  getBattlefieldLocalPosition,
+  DRAG_CARD_ID,
+} from "./engine/zoneView";
+import {
+  DemoCard3dTable,
+  DemoCard3dRead,
+  demoCardScaleById,
+  face,
+  BACK,
+} from "./DemoCard3d";
 
 /**
  * World pose for read-mode: billboard + uniform scale. Center Y is high enough that the full
@@ -50,33 +70,15 @@ const READ_BILLBOARD = {
 /** Default demo camera; `lookAt` is origin — distance scales dolly in/out. */
 const BASE_CAMERA: [number, number, number] = [0, 6.4, 7.2];
 
-function cardScaleById(id: string): number {
-  if (id.startsWith("c-deck-")) {
-    return 1;
-  }
-  switch (id) {
-    case "c-hand-1":
-    case "c-hand-2":
-    case "c-hand-3":
-    case "c-hand-4":
-      return 1.05;
-    case "c-bf-1":
-    case DRAG_CARD_ID:
-      return 1.08;
-    case "c-gy-1":
-    case "c-gy-2":
-    case "c-gy-3":
-    case "c-stack-1":
-    case "c-stack-2":
-      return 1;
-    default:
-      return 1;
-  }
-}
-
 type Log = { t: string; m: string };
 
 export function App() {
+  const engine = useDemoSession();
+  const handIds = useMemo(() => getHandIds(engine.state), [engine.state]);
+  const bfIds = useMemo(() => getBattlefieldIds(engine.state), [engine.state]);
+  const gyIds = useMemo(() => getGraveyardIds(engine.state), [engine.state]);
+  const stack3dIds = useMemo(() => getStack3dIds(engine.state), [engine.state]);
+
   const [logs, setLogs] = useState<Log[]>([]);
   const [dropOn, setDropOn] = useState(false);
   const [oneTapped, setOneTapped] = useState(false);
@@ -171,6 +173,23 @@ export function App() {
     [readMode, selectedId]
   );
 
+  const onHandOrderChange = useCallback(
+    (detail: { fromIndex: number; toIndex: number }) => {
+      if (detail.fromIndex === detail.toIndex) {
+        return;
+      }
+      engine.dispatch(
+        reorderZoneCardsAction(
+          "p1",
+          demoZones.hand,
+          detail.fromIndex,
+          detail.toIndex
+        )
+      );
+    },
+    [engine]
+  );
+
   const showReadCard = useCallback(() => {
     if (!selectedId) {
       push("show: select a card first");
@@ -192,6 +211,16 @@ export function App() {
     setReadSnapshot(null);
     readCaptureGate.current = false;
   }, []);
+
+  useEffect(() => {
+    const s = allOnTableCardIds(engine.state);
+    for (let i = 0; i < 5; i++) {
+      s.add(`c-deck-${i}`);
+    }
+    if (selectedId && !s.has(selectedId)) {
+      setSelectedId(null);
+    }
+  }, [engine.state, selectedId]);
 
   useLayoutEffect(() => {
     if (!readMode || !selectedId || readExiting) {
@@ -301,101 +330,31 @@ export function App() {
   /** 3D read duplicate (moved in world by `ReadCardFlight`) — not `screenOverlay`. */
   const renderReadCard3d = useCallback(
     (id: string): ReactNode => {
-      const p: [number, number, number] = [0, 0, 0];
-      const b = { position: p, back: BACK, selected: true, renderOrder: 10 };
-      switch (id) {
-        case "c-hand-1":
-          return (
-            <Card
-              id="c-hand-1"
-              {...b}
-              face={face(1)}
-              cardScale={1.05}
-              faceUp={isFaceUp("c-hand-1")}
-              onCardDoubleClick={() => toggleFace("c-hand-1")}
-            />
-          );
-        case "c-hand-2":
-          return (
-            <Card
-              id="c-hand-2"
-              {...b}
-              face={face(2)}
-              cardScale={1.05}
-              faceUp={isFaceUp("c-hand-2")}
-              highlighted={oneHighlight}
-              onCardDoubleClick={() => toggleFace("c-hand-2")}
-            />
-          );
-        case "c-hand-3":
-          return (
-            <Card
-              id="c-hand-3"
-              {...b}
-              face={face(2)}
-              cardScale={1.05}
-              faceUp={isFaceUp("c-hand-3")}
-              tapped={oneTapped}
-              onCardDoubleClick={() => toggleFace("c-hand-3")}
-            />
-          );
-        case "c-hand-4":
-          return (
-            <Card
-              id="c-hand-4"
-              {...b}
-              face={face(1)}
-              cardScale={1.05}
-              faceUp={isFaceUp("c-hand-4")}
-              disabled
-            />
-          );
-        case "c-bf-1":
-          return (
-            <Card
-              id="c-bf-1"
-              {...b}
-              face={face(1)}
-              cardScale={1.08}
-              faceUp={isFaceUp("c-bf-1")}
-              onCardDoubleClick={() => toggleFace("c-bf-1")}
-            />
-          );
-        case DRAG_CARD_ID:
-          return (
-            <Card
-              id={DRAG_CARD_ID}
-              {...b}
-              face={face(2)}
-              cardScale={1.08}
-              faceUp={isFaceUp(DRAG_CARD_ID)}
-              onCardPointerDown={() => {
-                setDragId(DRAG_CARD_ID);
-                events.onCardDragStart(DRAG_CARD_ID);
-              }}
-              onCardPointerUp={() => {}}
-              onCardDoubleClick={() => toggleFace(DRAG_CARD_ID)}
-            />
-          );
-        case "c-gy-1":
-          return <Card id="c-gy-1" {...b} face={face(2)} cardScale={1} faceUp={isFaceUp("c-gy-1")} />;
-        case "c-gy-2":
-          return <Card id="c-gy-2" {...b} face={face(1)} cardScale={1} faceUp={isFaceUp("c-gy-2")} />;
-        case "c-gy-3":
-          return <Card id="c-gy-3" {...b} face={face(2)} cardScale={1} faceUp={isFaceUp("c-gy-3")} />;
-        case "c-stack-1":
-          return <Card id="c-stack-1" {...b} face={face(1)} cardScale={1} faceUp={isFaceUp("c-stack-1")} />;
-        case "c-stack-2":
-          return <Card id="c-stack-2" {...b} face={face(2)} cardScale={1} faceUp={isFaceUp("c-stack-2")} />;
-        default: {
-          if (id.startsWith("c-deck-")) {
-            return <Card id={id} {...b} face={face(1)} cardScale={1} faceUp={false} />;
+      return (
+        <DemoCard3dRead
+          id={id}
+          state={engine.state}
+          isFaceUp={isFaceUp}
+          onToggleFace={toggleFace}
+          oneHighlight={oneHighlight}
+          oneTapped={oneTapped}
+          onDragForRead={
+            id === DRAG_CARD_ID
+              ? {
+                  onPointerDown: () => {
+                    setDragId(DRAG_CARD_ID);
+                    events.onCardDragStart(DRAG_CARD_ID);
+                  },
+                  onPointerUp: () => {
+                    /* TablePlaneDrag ends via window; read mode rarely drags */
+                  },
+                }
+              : undefined
           }
-          return null;
-        }
-      }
+        />
+      );
     },
-    [DRAG_CARD_ID, isFaceUp, oneHighlight, oneTapped, toggleFace, events]
+    [DRAG_CARD_ID, engine.state, isFaceUp, oneHighlight, oneTapped, toggleFace, events]
   );
 
   return (
@@ -433,54 +392,28 @@ export function App() {
           <Suspense fallback={null}>
             <PlayerArea side="near" position={[0, 0, 2.3]}>
               <HandZone id="p1-hand" position={[-0.2, 0, 1.1]}>
-                <CardFan radius={1.2} style="ecard" zBowl={0.004} maxRollZ={0.05}>
-                  <Card
-                    ref={setCardGroupRef("c-hand-1")}
-                    id="c-hand-1"
-                    face={face(1)}
-                    back={BACK}
-                    cardScale={1.05}
-                    faceUp={isFaceUp("c-hand-1")}
-                    selected={selectedId === "c-hand-1"}
-                    visible={inPlay("c-hand-1")}
-                    onCardDoubleClick={() => toggleFace("c-hand-1")}
-                  />
-                  <Card
-                    ref={setCardGroupRef("c-hand-2")}
-                    id="c-hand-2"
-                    face={face(2)}
-                    back={BACK}
-                    cardScale={1.05}
-                    faceUp={isFaceUp("c-hand-2")}
-                    selected={selectedId === "c-hand-2"}
-                    highlighted={oneHighlight}
-                    visible={inPlay("c-hand-2")}
-                    onCardDoubleClick={() => toggleFace("c-hand-2")}
-                  />
-                  <Card
-                    ref={setCardGroupRef("c-hand-3")}
-                    id="c-hand-3"
-                    face={face(2)}
-                    back={BACK}
-                    cardScale={1.05}
-                    faceUp={isFaceUp("c-hand-3")}
-                    selected={selectedId === "c-hand-3"}
-                    tapped={oneTapped}
-                    visible={inPlay("c-hand-3")}
-                    onCardDoubleClick={() => toggleFace("c-hand-3")}
-                  />
-                  <Card
-                    ref={setCardGroupRef("c-hand-4")}
-                    id="c-hand-4"
-                    face={face(1)}
-                    back={BACK}
-                    cardScale={1.05}
-                    faceUp={isFaceUp("c-hand-4")}
-                    selected={selectedId === "c-hand-4"}
-                    disabled
-                    visible={inPlay("c-hand-4")}
-                  />
-                </CardFan>
+                <ReorderableCardFan
+                  cardIds={handIds}
+                  onHandOrderChange={onHandOrderChange}
+                  handZoneId={demoZones.hand}
+                  renderCard={(hid) => (
+                    <DemoCard3dTable
+                      id={hid}
+                      state={engine.state}
+                      setCardGroupRef={setCardGroupRef}
+                      isFaceUp={isFaceUp}
+                      selectedId={selectedId}
+                      inPlay={inPlay}
+                      onToggleFace={toggleFace}
+                      oneHighlight={oneHighlight}
+                      oneTapped={oneTapped}
+                    />
+                  )}
+                  radius={1.2}
+                  style="ecard"
+                  zBowl={0.004}
+                  maxRollZ={0.05}
+                />
               </HandZone>
 
               <DeckZone id="p1-deck" position={[-4.2, 0, 0.2]}>
@@ -505,81 +438,70 @@ export function App() {
 
               <GraveyardZone id="p1-grave" position={[3.2, 0, 0.1]}>
                 <CardPile>
-                  <Card
-                    ref={setCardGroupRef("c-gy-1")}
-                    id="c-gy-1"
-                    face={face(2)}
-                    back={BACK}
-                    faceUp
-                    selected={selectedId === "c-gy-1"}
-                    visible={inPlay("c-gy-1")}
-                  />
-                  <Card
-                    ref={setCardGroupRef("c-gy-2")}
-                    id="c-gy-2"
-                    face={face(1)}
-                    back={BACK}
-                    faceUp
-                    selected={selectedId === "c-gy-2"}
-                    visible={inPlay("c-gy-2")}
-                  />
-                  <Card
-                    ref={setCardGroupRef("c-gy-3")}
-                    id="c-gy-3"
-                    face={face(2)}
-                    back={BACK}
-                    faceUp
-                    selected={selectedId === "c-gy-3"}
-                    visible={inPlay("c-gy-3")}
-                  />
+                  {gyIds.map((gid) => (
+                    <DemoCard3dTable
+                      key={gid}
+                      id={gid}
+                      state={engine.state}
+                      setCardGroupRef={setCardGroupRef}
+                      isFaceUp={isFaceUp}
+                      selectedId={selectedId}
+                      inPlay={inPlay}
+                      onToggleFace={toggleFace}
+                      oneHighlight={oneHighlight}
+                      oneTapped={oneTapped}
+                    />
+                  ))}
                 </CardPile>
               </GraveyardZone>
             </PlayerArea>
 
             <BattlefieldZone id="battlefield" position={[0, 0, -0.5]}>
               <group ref={battlefieldGroupRef}>
-                <group position={[-0.55, 0, 0]}>
-                  <Card
-                    ref={setCardGroupRef("c-bf-1")}
-                    id="c-bf-1"
-                    position={[0, 0, 0]}
-                    face={face(1)}
-                    back={BACK}
-                    cardScale={1.08}
-                    faceUp={isFaceUp("c-bf-1")}
-                    selected={selectedId === "c-bf-1"}
-                    visible={inPlay("c-bf-1")}
-                    onCardDoubleClick={() => toggleFace("c-bf-1")}
-                  />
-                  <CardVfx
-                    kind={vfxKind}
-                    trigger={vfxTrigger}
-                    scale={1.08}
-                    faceAlign
-                  />
-                </group>
-                <Card
-                  ref={setCardGroupRef(DRAG_CARD_ID)}
-                  id={DRAG_CARD_ID}
-                  position={bf2Pos}
-                  face={face(2)}
-                  back={BACK}
-                  cardScale={1.08}
-                  faceUp={isFaceUp(DRAG_CARD_ID)}
-                  selected={selectedId === DRAG_CARD_ID}
-                  visible={inPlay(DRAG_CARD_ID)}
-                  onCardPointerDown={() => {
-                    setDragId(DRAG_CARD_ID);
-                    events.onCardDragStart(DRAG_CARD_ID);
-                  }}
-                  onCardPointerUp={() => {
-                    /* end handled by window pointerup in TablePlaneDrag */
-                  }}
-                  onCardDoubleClick={() => toggleFace(DRAG_CARD_ID)}
-                />
+                {bfIds.map((bid, bfi) => {
+                  const pos = getBattlefieldLocalPosition(bid, bfIds, bf2Pos);
+                  return (
+                    <group key={bid} position={pos}>
+                      <DemoCard3dTable
+                        id={bid}
+                        state={engine.state}
+                        setCardGroupRef={setCardGroupRef}
+                        isFaceUp={isFaceUp}
+                        selectedId={selectedId}
+                        inPlay={inPlay}
+                        onToggleFace={toggleFace}
+                        oneHighlight={oneHighlight}
+                        oneTapped={oneTapped}
+                        onDragPointer={
+                          bid === DRAG_CARD_ID
+                            ? {
+                                onPointerDown: () => {
+                                  setDragId(DRAG_CARD_ID);
+                                  events.onCardDragStart(DRAG_CARD_ID);
+                                },
+                                onPointerUp: () => {
+                                  /* end handled by window pointerup in TablePlaneDrag */
+                                },
+                              }
+                            : undefined
+                        }
+                      />
+                      {bfi === 0 && bfIds[0] != null ? (
+                        <CardVfx
+                          kind={vfxKind}
+                          trigger={vfxTrigger}
+                          scale={demoCardScaleById(bfIds[0])}
+                          faceAlign
+                        />
+                      ) : null}
+                    </group>
+                  );
+                })}
               </group>
               <TablePlaneDrag
-                active={dragId === DRAG_CARD_ID}
+                active={
+                  dragId === DRAG_CARD_ID && bfIds.includes(DRAG_CARD_ID)
+                }
                 planeY={0.08}
                 parentRef={battlefieldGroupRef}
                 onDrag={onDragBf2}
@@ -589,24 +511,20 @@ export function App() {
 
             <StackZone id="stack" position={[-0.2, 0, -1.2]}>
               <CardStack yStep={0.03}>
-                <Card
-                  ref={setCardGroupRef("c-stack-1")}
-                  id="c-stack-1"
-                  face={face(1)}
-                  back={BACK}
-                  faceUp
-                  selected={selectedId === "c-stack-1"}
-                  visible={inPlay("c-stack-1")}
-                />
-                <Card
-                  ref={setCardGroupRef("c-stack-2")}
-                  id="c-stack-2"
-                  face={face(2)}
-                  back={BACK}
-                  faceUp
-                  selected={selectedId === "c-stack-2"}
-                  visible={inPlay("c-stack-2")}
-                />
+                {stack3dIds.map((sid) => (
+                  <DemoCard3dTable
+                    key={sid}
+                    id={sid}
+                    state={engine.state}
+                    setCardGroupRef={setCardGroupRef}
+                    isFaceUp={isFaceUp}
+                    selectedId={selectedId}
+                    inPlay={inPlay}
+                    onToggleFace={toggleFace}
+                    oneHighlight={oneHighlight}
+                    oneTapped={oneTapped}
+                  />
+                ))}
               </CardStack>
             </StackZone>
 
@@ -615,7 +533,7 @@ export function App() {
                 key={readFlightKey}
                 snapshot={readSnapshot}
                 toPos={READ_BILLBOARD.position}
-                toScaleU={READ_BILLBOARD.scale * cardScaleById(selectedId)}
+                toScaleU={READ_BILLBOARD.scale * demoCardScaleById(selectedId)}
                 leaving={readExiting}
                 onReturnComplete={onReadReturnComplete}
               >
@@ -811,6 +729,111 @@ export function App() {
           >
             Reset table
           </button>
+        </p>
+        <p
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            maxWidth: 420,
+            alignItems: "flex-start",
+            fontSize: 12,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>Rules engine (@tcgl/core)</span>
+          <span style={{ opacity: 0.85 }}>
+            Authoritative state is separate from 3D layout. Use controls to dispatch actions; last
+            error and event log update here.
+          </span>
+          <code style={{ fontSize: 11, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+            active={engine.state.activePlayer} phase={engine.state.turnPhase} stack=
+            {engine.state.stack.length} priority={engine.state.priorityPlayer ?? "—"}
+          </code>
+          {engine.lastError ? (
+            <span style={{ color: "#f87171" }}>Last error: {engine.lastError}</span>
+          ) : null}
+          <span style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => {
+                const r = engine.dispatch(
+                  moveCardAction("p1", "c-hand-1", demoZones.hand, demoZones.bf)
+                );
+                if (!r.error) {
+                  push(`engine: ${r.events.map((e) => e.type).join(", ")}`);
+                }
+              }}
+            >
+              Move c-hand-1 → battlefield
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const r = engine.dispatch(endTurnAction("p1"));
+                if (!r.error) {
+                  push(`engine: ${r.events.map((e) => e.type).join(", ")}`);
+                }
+              }}
+            >
+              End turn (p1)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const r = engine.dispatch(advanceStepAction("p1"));
+                if (!r.error) {
+                  push(`engine: ${r.events.map((e) => e.type).join(", ")}`);
+                }
+              }}
+            >
+              Advance step
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const r = engine.dispatch(
+                  castToStackAction("p1", "c-hand-2", demoZones.hand)
+                );
+                if (!r.error) {
+                  push(`engine: ${r.events.map((e) => e.type).join(", ")}`);
+                }
+              }}
+            >
+              Cast c-hand-2
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const p = engine.state.priorityPlayer;
+                if (!p) {
+                  return;
+                }
+                const r = engine.dispatch(passPriorityAction(p));
+                if (!r.error) {
+                  push(`engine: pass ${p}: ${r.events.map((e) => e.type).join(", ")}`);
+                }
+              }}
+            >
+              Pass priority
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                engine.reset();
+                push("engine: reset to seedDemoGame");
+              }}
+            >
+              Reset engine
+            </button>
+          </span>
+          <span style={{ opacity: 0.8 }}>Recent engine events (tail)</span>
+          <code style={{ fontSize: 10, maxHeight: 120, overflow: "auto" }}>
+            {JSON.stringify(
+              engine.log.entries.slice(-8).map((e) => e.type),
+              null,
+              0
+            )}
+          </code>
         </p>
         <p>
           <strong>TCGL v0</strong> — presentation + interaction. Hover, tilt, click/double-click,

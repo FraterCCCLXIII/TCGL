@@ -1,0 +1,28 @@
+{
+  "name": "@tcgl/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Authoritative match + WebSocket gateway for TCGL (uses @tcgl/core).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/run.js"
+  },
+  "dependencies": {
+    "@tcgl/core": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.3"
+  }
+}

@@ -7,7 +7,8 @@
   ],
   "scripts": {
     "dev": "npm run dev -w demo",
-    "build": "npm run build -w tcgl && npm run build -w demo",
+    "build": "npm run build -w @tcgl/core && npm run build -w tcgl && npm run build -w @tcgl/server && npm run build -w @tcgl/game-mtg-lite && npm run build -w demo",
+    "test": "npm run test -w @tcgl/core",
     "tcgl:build": "npm run build -w tcgl"
   },
   "devDependencies": {
