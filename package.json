@@ -1,0 +1,16 @@
+{
+  "name": "tcgl-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w demo",
+    "build": "npm run build -w tcgl && npm run build -w demo",
+    "tcgl:build": "npm run build -w tcgl"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3"
+  }
+}
