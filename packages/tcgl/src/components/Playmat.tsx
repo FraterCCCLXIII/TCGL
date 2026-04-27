@@ -1,8 +1,53 @@
 import { ContactShadows, Line, MeshReflectorMaterial } from "@react-three/drei";
-import { type ReactNode, useMemo } from "react";
-import { Vector3 } from "three";
+import { type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
+import { type LineSegments, Vector3 } from "three";
 import { useTCGL } from "../context/TCGLContext";
 import type { R3FGroupProps } from "../types";
+import { buildPlaymatGridGeometryBuffer } from "./playmatGridLines";
+
+/** Floor-group +Z of procedural top faces; must match `mesh` positions in the floor group. */
+const PLAYMAT_PLANE_Z = 0.001;
+const PLAYMAT_PLANE_Z_SPLIT = 0.0015;
+
+export type PlaymatGridConfig = {
+  show?: boolean;
+  /** Cells along the playmat **width** (X). @default 8 */
+  divisionsX?: number;
+  /** Cells along the playmat **depth** (Y in floor group). @default 7 */
+  divisionsY?: number;
+  color?: string;
+  opacity?: number;
+  /**
+   * Extra +Z in the floor group, added on top of the playmat **surface** plane (not above it by
+   * default). Use only to fix z-fighting if needed.
+   * @default 0
+   */
+  zOffset?: number;
+};
+
+const defaultPlaymatGrid: Required<PlaymatGridConfig> = {
+  show: true,
+  divisionsX: 8,
+  divisionsY: 7,
+  color: "#2a2a36",
+  opacity: 0.5,
+  zOffset: 0,
+};
+
+function resolvePlaymatGrid(
+  g: boolean | PlaymatGridConfig | undefined
+): PlaymatGridConfig | null {
+  if (g == null || g === false) {
+    return null;
+  }
+  if (g === true) {
+    return { ...defaultPlaymatGrid };
+  }
+  if (g.show === false) {
+    return null;
+  }
+  return { ...defaultPlaymatGrid, ...g };
+}
 
 export type PlaymatProps = {
   children?: ReactNode;
@@ -10,6 +55,10 @@ export type PlaymatProps = {
   y?: number;
   color?: string;
   reflector?: boolean;
+  /**
+   * Two-tone table along **playmat depth** (near vs far, seam runs across **width**). `near` tints
+   * the +Y half of the floor plane in the mat’s local space (+Z toward the “near” side after tilt).
+   */
   splitSides?: { near: string; far: string };
   showCenterSeam?: boolean;
   showZoneGuides?: boolean;
@@ -22,7 +71,8 @@ export type PlaymatProps = {
   showSurface?: boolean;
   /**
    * Renders a full `w`×`d` `ShadowMaterial` floor (invisible except for received shadows) when
-   * there is no procedural `showSurface` — use with a 2D playmat under a transparent WebGL clear.
+   * there is no procedural `showSurface` — use with a 2D playmat in HTML/CSS behind a
+   * transparent WebGL clear (the art is not part of the 3D scene).
    * @default false
    */
   shadowCatcher?: boolean;
@@ -35,6 +85,12 @@ export type PlaymatProps = {
    * Tips the table surface and all children together. @default [0, 0, 0]
    */
   tilt?: [number, number, number];
+  /**
+   * Optional top-face grid (`LineSegments`). Does **not** cast or receive directional shadow maps
+   * (enforced in code). Ignored if `showSurface` is false.
+   * @default off
+   */
+  playmatGrid?: boolean | PlaymatGridConfig;
 } & Omit<R3FGroupProps, "position"> & {
   position?: R3FGroupProps["position"];
 };
@@ -56,19 +112,21 @@ export function Playmat({
   shadowCatcher = false,
   shadowCatcherOpacity = 0.22,
   tilt = [0, 0, 0] as [number, number, number],
+  playmatGrid: playmatGridProp,
   ...groupProps
 }: PlaymatProps) {
   const [w, d] = size;
-  const halfW = w / 2;
   const args = useMemo(() => [w, d] as [number, number], [w, d]);
-  const halfArgs = useMemo(
-    () => [halfW, d] as [number, number],
-    [halfW, d]
+  const halfD = d / 2;
+  /** `splitSides` planes: `w` × `d/2` (full width, half depth) — seam runs along the width (±X) so “near / far” follow the `d` axis (playmat “depth”). */
+  const splitHalfDepthArgs = useMemo(
+    () => [w, halfD] as [number, number],
+    [w, halfD]
   );
   const yNum = y;
   const margin = 0.98;
   const { shadows: shadowsOn } = useTCGL();
-  /** Invisible table that only shows shadows — not combined with a solid procedural top (that would block a 2D playmat). */
+  /** Invisible table that only shows shadows — not combined with a solid procedural top. */
   const useShadowCatcher = shadowCatcher && !showSurface;
   const hasFloor = showSurface || useShadowCatcher;
   const showContact = contactShadows && shadowsOn && hasFloor;
@@ -84,6 +142,47 @@ export function Playmat({
     ];
   }, [d, w]);
 
+  const gridCfg = useMemo(
+    () => resolvePlaymatGrid(playmatGridProp),
+    [playmatGridProp]
+  );
+  const resolvedGrid = useMemo(() => {
+    if (!gridCfg) {
+      return null;
+    }
+    return { ...defaultPlaymatGrid, ...gridCfg };
+  }, [gridCfg]);
+  const gridGeometry = useMemo(() => {
+    if (!showSurface || !resolvedGrid) {
+      return null;
+    }
+    const c = resolvedGrid;
+    const planeZ = splitSides ? PLAYMAT_PLANE_Z_SPLIT : PLAYMAT_PLANE_Z;
+    return buildPlaymatGridGeometryBuffer({
+      w,
+      d,
+      z: planeZ + c.zOffset,
+      divisionsX: c.divisionsX,
+      divisionsY: c.divisionsY,
+      includeTableSplitLine: Boolean(splitSides),
+    });
+  }, [showSurface, resolvedGrid, splitSides, w, d]);
+  useLayoutEffect(() => {
+    return () => {
+      gridGeometry?.dispose();
+    };
+  }, [gridGeometry]);
+
+  const playmatGridLineRef = useRef<LineSegments | null>(null);
+  useLayoutEffect(() => {
+    const o = playmatGridLineRef.current;
+    if (!o) {
+      return;
+    }
+    o.castShadow = false;
+    o.receiveShadow = false;
+  }, [showSurface, gridGeometry]);
+
   return (
     <group
       position={[0, yNum, 0]}
@@ -94,7 +193,7 @@ export function Playmat({
         <>
           <group rotation={[-Math.PI / 2, 0, 0]}>
             {useShadowCatcher ? (
-              <mesh position={[0, 0, 0]} receiveShadow={shadowsOn}>
+              <mesh position={[0, 0, 0]} receiveShadow={shadowsOn} renderOrder={0}>
                 <planeGeometry args={args} />
                 <shadowMaterial
                   color="#000000"
@@ -106,12 +205,16 @@ export function Playmat({
             {showSurface ? (
               splitSides ? (
                 <>
+                  {/**
+                   * Floor group: local X = width `w`, local Y = depth `d`. Seam is at y=0 (along +X):
+                   * near = +Y half (typically +Z after tilt, player side), far = −Y half.
+                   */}
                   <mesh
-                    position={[-halfW / 2, 0, 0.0015]}
+                    position={[0, d / 4, PLAYMAT_PLANE_Z_SPLIT]}
                     receiveShadow={shadowsOn}
                     renderOrder={0}
                   >
-                    <planeGeometry args={halfArgs} />
+                    <planeGeometry args={splitHalfDepthArgs} />
                     <meshStandardMaterial
                       color={splitSides.near}
                       roughness={0.92}
@@ -119,11 +222,11 @@ export function Playmat({
                     />
                   </mesh>
                   <mesh
-                    position={[halfW / 2, 0, 0.0015]}
+                    position={[0, -d / 4, PLAYMAT_PLANE_Z_SPLIT]}
                     receiveShadow={shadowsOn}
                     renderOrder={0}
                   >
-                    <planeGeometry args={halfArgs} />
+                    <planeGeometry args={splitHalfDepthArgs} />
                     <meshStandardMaterial
                       color={splitSides.far}
                       roughness={0.92}
@@ -132,7 +235,7 @@ export function Playmat({
                   </mesh>
                   {showCenterSeam && (
                     <mesh position={[0, 0, 0.0025]} renderOrder={0}>
-                      <planeGeometry args={[0.04, d]} />
+                      <planeGeometry args={[w, 0.04]} />
                       <meshStandardMaterial
                         color="#6c6c74"
                         emissive="#4e4e56"
@@ -142,7 +245,7 @@ export function Playmat({
                   )}
                 </>
               ) : reflector ? (
-                <mesh position={[0, 0, 0.001]} receiveShadow={shadowsOn}>
+                <mesh position={[0, 0, PLAYMAT_PLANE_Z]} receiveShadow={shadowsOn}>
                   <planeGeometry args={args} />
                   <MeshReflectorMaterial
                     color={color}
@@ -152,7 +255,7 @@ export function Playmat({
                   />
                 </mesh>
               ) : (
-                <mesh position={[0, 0, 0.001]} receiveShadow={shadowsOn}>
+                <mesh position={[0, 0, PLAYMAT_PLANE_Z]} receiveShadow={shadowsOn}>
                   <planeGeometry args={args} />
                   <meshStandardMaterial color={color} roughness={0.9} metalness={0.05} />
                 </mesh>
@@ -169,6 +272,34 @@ export function Playmat({
                 position={[0, 0.002, 0]}
               />
             )}
+            {showSurface && gridGeometry && resolvedGrid ? (
+              <lineSegments
+                ref={playmatGridLineRef}
+                castShadow={false}
+                receiveShadow={false}
+                frustumCulled={false}
+                geometry={gridGeometry}
+                /**
+                 * After ContactShadows (default 0) so the grid is not interleaved in depth with
+                 * the soft shadow pass when pitch/angle changes.
+                 */
+                renderOrder={20}
+              >
+                <lineBasicMaterial
+                  color={resolvedGrid.color}
+                  transparent
+                  opacity={resolvedGrid.opacity}
+                  depthTest
+                  depthWrite={false}
+                  fog={false}
+                  /** Prevent shadow-map / layer interaction with the table when tilted. */
+                  toneMapped={false}
+                  polygonOffset
+                  polygonOffsetFactor={-0.35}
+                  polygonOffsetUnits={-0.35}
+                />
+              </lineSegments>
+            ) : null}
           </group>
           {showContact ? (
             <ContactShadows

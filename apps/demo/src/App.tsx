@@ -110,13 +110,17 @@ export function App() {
   const [vfxKind, setVfxKind] = useState<CardVfxKind>("damage");
   const [vfxTrigger, setVfxTrigger] = useState(0);
   /**
-   * 2D playmat image under a transparent WebGL view (not a 3D texture). When on with 3D table
-   * off, an invisible 3D floor still receives card shadows.
+   * 2D playmat image behind the WebGL view (not a 3D texture). With 3D table off, a transparent
+   * clear + invisible `ShadowMaterial` floor still shows contact shadows.
    */
   const [playmatImageBehind, setPlaymatImageBehind] = useState(false);
   /** When false, hides the 3D table split planes, seam, and playmat contact-shadow (not card shadows). */
   const [showPlaymatSurface, setShowPlaymatSurface] = useState(true);
   const use2dPlaymatBackdrop = playmatImageBehind && !showPlaymatSurface;
+  /** Top-face grid (only when 3D table surface is on). @default off */
+  const [playmatGridOn, setPlaymatGridOn] = useState(false);
+  /** Right-side control drawer; FAB toggles. */
+  const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
   const tableTilt = useMemo(
     () =>
       [
@@ -239,8 +243,12 @@ export function App() {
       if (e.key === "s" || e.key === "S") {
         showReadCard();
       }
-      if (e.key === "Escape" && readMode) {
-        setReadExiting(true);
+      if (e.key === "Escape") {
+        if (readMode) {
+          setReadExiting(true);
+        } else if (settingsDrawerOpen) {
+          setSettingsDrawerOpen(false);
+        }
       }
       const vmap: CardVfxKind[] = [
         "damage",
@@ -258,7 +266,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [flipSelected, readMode, showReadCard]);
+  }, [flipSelected, readMode, showReadCard, settingsDrawerOpen]);
 
   const events: CardInteractionEvents = useMemo(
     () => ({
@@ -406,6 +414,7 @@ export function App() {
           events={events}
           shadows={shadowsOn}
           style={{ height: "100vh" }}
+          backgroundColor="#5a5a62"
           transparentBackground={use2dPlaymatBackdrop}
         >
         <CameraRig position={cameraPosition} fov={40} />
@@ -419,6 +428,7 @@ export function App() {
           showCenterSeam
           showSurface={showPlaymatSurface}
           shadowCatcher={use2dPlaymatBackdrop}
+          playmatGrid={playmatGridOn && showPlaymatSurface}
         >
           <Suspense fallback={null}>
             <PlayerArea side="near" position={[0, 0, 2.3]}>
@@ -623,8 +633,51 @@ export function App() {
         </Playmat>
         </TCGLCanvas>
 
-      <div className="hud">
-        <div className="hud-scroll">
+      <div className="demo-chrome">
+        <button
+          type="button"
+          className="demo-drawer-fab"
+          onClick={() => setSettingsDrawerOpen((o) => !o)}
+          aria-expanded={settingsDrawerOpen}
+          aria-controls="tcgl-settings-drawer"
+          title={settingsDrawerOpen ? "Close settings" : "Open settings"}
+        >
+          {settingsDrawerOpen ? (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <line x1="4" y1="6" x2="20" y2="6" />
+              <line x1="6" y1="12" x2="18" y2="12" />
+              <line x1="4" y1="18" x2="20" y2="18" />
+            </svg>
+          )}
+          <span className="sr-only">Settings</span>
+        </button>
+
+        <aside
+          id="tcgl-settings-drawer"
+          className={settingsDrawerOpen ? "demo-side-drawer demo-side-drawer--open" : "demo-side-drawer"}
+          role="complementary"
+          aria-label="Demo settings"
+          aria-hidden={!settingsDrawerOpen}
+          {...(!settingsDrawerOpen ? { inert: true } : {})}
+        >
+          <header className="demo-side-drawer__header">
+            <span className="demo-side-drawer__title">TCGL — controls</span>
+            <button
+              type="button"
+              className="demo-side-drawer__close"
+              onClick={() => setSettingsDrawerOpen(false)}
+              aria-label="Close settings"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </header>
+        <div className="hud-scroll demo-side-drawer__scroll">
         <p
           style={{
             display: "flex",
@@ -642,7 +695,7 @@ export function App() {
               checked={playmatImageBehind}
               onChange={(e) => setPlaymatImageBehind(e.target.checked)}
             />
-            <span>Playmat art (2D under the view — not a 3D floor texture)</span>
+            <span>Playmat art (2D layer under the view — not 3D; shadows use an invisible floor)</span>
           </label>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
             <input
@@ -652,16 +705,25 @@ export function App() {
             />
             <span>Show 3D table (split + seam + playmat contact shadow)</span>
           </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={playmatGridOn}
+              onChange={(e) => setPlaymatGridOn(e.target.checked)}
+              disabled={!showPlaymatSurface}
+            />
+            <span>Playmat grid</span>
+          </label>
           {playmatImageBehind && showPlaymatSurface ? (
             <span style={{ opacity: 0.8, fontSize: 11 }}>
-              Turn <strong>3D table</strong> off to see the 2D playmat: the table becomes transparent
-              in WebGL, but <strong>shadows</strong> still render on an invisible floor.
+              Turn <strong>3D table</strong> off: WebGL is transparent and the playmat is only CSS;{" "}
+              <strong>shadows</strong> still render in 3D on an invisible floor.
             </span>
           ) : null}
           {playmatImageBehind && !showPlaymatSurface ? (
             <span style={{ opacity: 0.75, fontSize: 11 }}>
-              Image: <code>public/arena-playmat.png</code> → <code>/arena-playmat.png</code> (gray
-              #5a5a62 if missing)
+              <code>public/arena-playmat.png</code> → <code>/arena-playmat.png</code> (checkered if
+              missing)
             </span>
           ) : null}
         </p>
@@ -811,6 +873,7 @@ export function App() {
           ))
         )}
         </div>
+        </aside>
       </div>
     </div>
   );
