@@ -1,3 +1,4 @@
+import type { ThreeEvent } from "@react-three/fiber";
 import {
   Suspense,
   useCallback,
@@ -14,6 +15,10 @@ import {
   BattlefieldZone,
   CameraRig,
   Card,
+  CardMotion,
+  CARD_MOTION_PRESETS,
+  flipDeal,
+  flipDealRevealFirst,
   type CardVfxKind,
   ReorderableCardFan,
   CardPile,
@@ -27,8 +32,10 @@ import {
   type CardInteractionEvents,
   Playmat,
   PlayerArea,
-  StackZone,
+  type CardSpatialPose,
+  type HandDragTowardTableDetail,
   TCGLCanvas,
+  Zone,
 } from "tcgl";
 import { TablePlaneDrag } from "./TablePlaneDrag";
 import {
@@ -41,13 +48,44 @@ import {
 } from "@tcgl/core";
 import { demoZones } from "./engine/seedDemoGame";
 import { useDemoSession } from "./engine/useDemoSession";
+import { GhostFollowGroup } from "./GhostFollowGroup";
+import { sampleCardSpatialPoseInAncestor } from "./engine/poseSample";
+import {
+  mergeStackOntoLink,
+  moveInsertIndexOntoCard,
+  nearestZoneCardXZ,
+  pruneInvalidStackLinks,
+  reorderIndicesForStackOnto,
+  STACK_DROP_RADIUS_PA,
+  type StackPresentationKind,
+} from "./engine/stackModel";
 import {
   allOnTableCardIds,
+  battlefieldGroupCentersXZ,
+  computeFrontPlayCardPosePA,
+  computeHandCardPosePA,
+  frontPlayPACentersXZ,
+  frontPlayReorderTargetIndex,
   getBattlefieldIds,
+  getBattlefieldVisualOffsets,
+  getFrontPlayIds,
+  getFrontPlayVisualOffsets,
+  getDeckIds,
   getGraveyardIds,
   getHandIds,
-  getStack3dIds,
+  getOpponentDeckIds,
+  getOpponentFrontPlayIds,
+  getOpponentGraveyardIds,
+  getOpponentHandIds,
   getBattlefieldLocalPosition,
+  FRONT_PLAY_ZONE_PA,
+  FRONT_PLAY_ZONE_PAD_SIZE,
+  GRAVEYARD_ZONE_PA_POSITION,
+  handDropInsertIndexFromPALocal,
+  HAND_RETURN_TARGET_PA,
+  isPointInFrontPlayDropZonePA,
+  isPointInGraveyardDropZonePA,
+  isPointInHandDropZonePA,
   DRAG_CARD_ID,
 } from "./engine/zoneView";
 import {
@@ -67,18 +105,103 @@ const READ_BILLBOARD = {
   scale: 1.1,
 } as const;
 
+/**
+ * PlayerArea-local poses for the `CardMotion` sample — roughly deck stack → above-hand landing.
+ * Tune these (or drive from refs / matrixWorld.decompose) for real zone-to-zone flights.
+ */
+const MOTION_DEMO_FROM = {
+  position: [-4.18, 0.14, 0.26] as [number, number, number],
+  rotation: [0, 0, 0] as [number, number, number],
+  scale: 1,
+};
+const MOTION_DEMO_TO = {
+  position: [-0.42, 0.13, 0.88] as [number, number, number],
+  rotation: [0, 0, 0] as [number, number, number],
+  scale: 1,
+};
+
 /** Default demo camera; `lookAt` is origin — distance scales dolly in/out. */
 const BASE_CAMERA: [number, number, number] = [0, 6.4, 7.2];
 
 type Log = { t: string; m: string };
 
+type ZoneFlightAnim =
+  | {
+      playerId: "p1" | "p2";
+      cardId: string;
+      kind: "hand-to-front" | "front-to-hand";
+      from: CardSpatialPose;
+      to: CardSpatialPose;
+      nonce: number;
+    }
+  | null;
+
+type DeckFlightAnim =
+  | {
+      playerId: "p1" | "p2";
+      cardId: string;
+      from: CardSpatialPose;
+      to: CardSpatialPose;
+      nonce: number;
+    }
+  | null;
+
+/** Subtle staging-strip tint under front-play cards so empty zones stay visible on both sides. */
+function FrontPlayStripPad() {
+  const [w, d] = FRONT_PLAY_ZONE_PAD_SIZE;
+  return (
+    <group position={[0, -0.004, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} renderOrder={-20}>
+        <planeGeometry args={[w, d]} />
+        <meshStandardMaterial
+          color="#8899aa"
+          transparent
+          opacity={0.14}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
 export function App() {
   const engine = useDemoSession();
   const handIds = useMemo(() => getHandIds(engine.state), [engine.state]);
+  const fpIds = useMemo(() => getFrontPlayIds(engine.state), [engine.state]);
   const bfIds = useMemo(() => getBattlefieldIds(engine.state), [engine.state]);
+  const fpIdsP2 = useMemo(
+    () => getOpponentFrontPlayIds(engine.state),
+    [engine.state]
+  );
+  const opponentHandIds = useMemo(
+    () => getOpponentHandIds(engine.state),
+    [engine.state]
+  );
+  const opponentDeckIds = useMemo(
+    () => getOpponentDeckIds(engine.state),
+    [engine.state]
+  );
+  const opponentGyIds = useMemo(
+    () => getOpponentGraveyardIds(engine.state),
+    [engine.state]
+  );
+  const [stackOnFp, setStackOnFp] = useState<Record<string, string>>({});
+  const [stackOnFpP2, setStackOnFpP2] = useState<Record<string, string>>({});
+  const [stackOnBf, setStackOnBf] = useState<Record<string, string>>({});
+  const [fpStackKind, setFpStackKind] =
+    useState<StackPresentationKind>("vertical");
+  const [bfStackKind, setBfStackKind] =
+    useState<StackPresentationKind>("overlap");
+  const bfOffsets = useMemo(
+    () => getBattlefieldVisualOffsets(bfIds, stackOnBf, bfStackKind),
+    [bfIds, stackOnBf, bfStackKind]
+  );
+  const bfCentersXZ = useMemo(
+    () => battlefieldGroupCentersXZ(bfIds, stackOnBf, bfStackKind),
+    [bfIds, stackOnBf, bfStackKind]
+  );
   const gyIds = useMemo(() => getGraveyardIds(engine.state), [engine.state]);
-  const stack3dIds = useMemo(() => getStack3dIds(engine.state), [engine.state]);
-
+  const deckIds = useMemo(() => getDeckIds(engine.state), [engine.state]);
   const [logs, setLogs] = useState<Log[]>([]);
   const [dropOn, setDropOn] = useState(false);
   const [oneTapped, setOneTapped] = useState(false);
@@ -123,6 +246,142 @@ export function App() {
   const [playmatGridOn, setPlaymatGridOn] = useState(false);
   /** Right-side control drawer; FAB toggles. */
   const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
+  /** One-shot proxy card flying deck→hand (`CardMotion` API demo). */
+  const [motionDemoActive, setMotionDemoActive] = useState(false);
+  const [motionDemoNonce, setMotionDemoNonce] = useState(0);
+  /** Vertical pull from hand fan → table plane drag (see `ReorderableCardFan` `onDragTowardTable`). */
+  const [handPlaneDrag, setHandPlaneDrag] = useState<{
+    cardId: string;
+    seed: { clientX: number; clientY: number };
+  } | null>(null);
+  /** Plane-drag ghost poses — refs avoid React rerenders every pointermove (see `GhostFollowGroup`). */
+  const handGhostPosRef = useRef<[number, number, number] | null>(null);
+  /** Double-click hand ↔ strip: animates before `moveCardAction`. */
+  const [zoneFlight, setZoneFlight] = useState<ZoneFlightAnim>(null);
+  /** Tap deck card → animated draw into hand (`moveCard` on complete). */
+  const [deckFlight, setDeckFlight] = useState<DeckFlightAnim>(null);
+  /** Front-strip drag: reorder in row or drop on hand. */
+  const [stripPlaneDrag, setStripPlaneDrag] = useState<{
+    cardId: string;
+    seed: { clientX: number; clientY: number };
+  } | null>(null);
+  const stripGhostPosRef = useRef<[number, number, number] | null>(null);
+
+  /**
+   * Zone order used for front-strip layout — includes preview slots during double-click flight so the
+   * row spreads before the card lands (hand→strip) and the fan opens before landing (strip→hand).
+   */
+  const layoutFpIds = useMemo(() => {
+    let ids = fpIds;
+    if (
+      zoneFlight?.playerId === "p1" &&
+      zoneFlight.kind === "front-to-hand"
+    ) {
+      ids = ids.filter((id) => id !== zoneFlight.cardId);
+    }
+    if (stripPlaneDrag != null) {
+      ids = ids.filter((id) => id !== stripPlaneDrag.cardId);
+    }
+    if (
+      zoneFlight?.playerId === "p1" &&
+      zoneFlight.kind === "hand-to-front"
+    ) {
+      ids = [...ids, zoneFlight.cardId];
+    }
+    return ids;
+  }, [fpIds, stripPlaneDrag, zoneFlight]);
+
+  const layoutFpIdsP2 = useMemo(() => {
+    let ids = fpIdsP2;
+    if (
+      zoneFlight?.playerId === "p2" &&
+      zoneFlight.kind === "front-to-hand"
+    ) {
+      ids = ids.filter((id) => id !== zoneFlight.cardId);
+    }
+    if (
+      zoneFlight?.playerId === "p2" &&
+      zoneFlight.kind === "hand-to-front"
+    ) {
+      ids = [...ids, zoneFlight.cardId];
+    }
+    return ids;
+  }, [fpIdsP2, zoneFlight]);
+
+  const layoutHandIdsForFan = useMemo(() => {
+    let ids = handIds;
+    if (
+      zoneFlight?.playerId === "p1" &&
+      zoneFlight.kind === "hand-to-front"
+    ) {
+      ids = ids.filter((id) => id !== zoneFlight.cardId);
+    }
+    if (handPlaneDrag != null) {
+      ids = ids.filter((id) => id !== handPlaneDrag.cardId);
+    }
+    if (deckFlight?.playerId === "p1") {
+      ids = [...ids, deckFlight.cardId];
+    }
+    if (
+      zoneFlight?.playerId === "p1" &&
+      zoneFlight.kind === "front-to-hand"
+    ) {
+      const insertIdx = handDropInsertIndexFromPALocal(
+        HAND_RETURN_TARGET_PA.position[0],
+        ids
+      );
+      return [
+        ...ids.slice(0, insertIdx),
+        zoneFlight.cardId,
+        ...ids.slice(insertIdx),
+      ];
+    }
+    return ids;
+  }, [deckFlight, handIds, handPlaneDrag, zoneFlight]);
+
+  const layoutHandIdsForFanP2 = useMemo(() => {
+    let ids = opponentHandIds;
+    if (deckFlight?.playerId === "p2") {
+      ids = [...ids, deckFlight.cardId];
+    }
+    if (
+      zoneFlight?.playerId === "p2" &&
+      zoneFlight.kind === "hand-to-front"
+    ) {
+      ids = ids.filter((id) => id !== zoneFlight.cardId);
+    }
+    if (
+      zoneFlight?.playerId === "p2" &&
+      zoneFlight.kind === "front-to-hand"
+    ) {
+      const insertIdx = handDropInsertIndexFromPALocal(
+        HAND_RETURN_TARGET_PA.position[0],
+        ids
+      );
+      return [
+        ...ids.slice(0, insertIdx),
+        zoneFlight.cardId,
+        ...ids.slice(insertIdx),
+      ];
+    }
+    return ids;
+  }, [deckFlight, opponentHandIds, zoneFlight]);
+
+  const fpOffsets = useMemo(
+    () => getFrontPlayVisualOffsets(layoutFpIds, stackOnFp, fpStackKind),
+    [layoutFpIds, stackOnFp, fpStackKind]
+  );
+  const fpCentersXZ = useMemo(
+    () => frontPlayPACentersXZ(layoutFpIds, stackOnFp, fpStackKind),
+    [layoutFpIds, stackOnFp, fpStackKind]
+  );
+
+  const fpOffsetsP2 = useMemo(
+    () =>
+      getFrontPlayVisualOffsets(layoutFpIdsP2, stackOnFpP2, fpStackKind),
+    [layoutFpIdsP2, stackOnFpP2, fpStackKind]
+  );
+
   const tableTilt = useMemo(
     () =>
       [
@@ -133,6 +392,18 @@ export function App() {
     [tiltPitchDeg, tiltYawDeg, tiltRollDeg]
   );
   const battlefieldGroupRef = useRef<Group>(null);
+  /** Last drag-sample pose on battlefield plane (for stack-on-drop). */
+  const lastBfDragLocal = useRef<[number, number, number] | null>(null);
+  /** Near player `PlayerArea` root — used to project hand-drag onto the table plane. */
+  const playerAreaRef = useRef<Group>(null);
+  /** Far opponent `PlayerArea` — deck draw pose sampling (same local layout as near, mirrored by π yaw). */
+  const opponentAreaRef = useRef<Group>(null);
+  const lastHandDragLocal = useRef<[number, number, number] | null>(null);
+  const handDragCardRef = useRef<string | null>(null);
+  const lastStripDragLocal = useRef<[number, number, number] | null>(null);
+  const stripDragCardRef = useRef<string | null>(null);
+  const zoneFlightRef = useRef<ZoneFlightAnim>(null);
+  const deckFlightRef = useRef<DeckFlightAnim>(null);
   const cardGroupById = useRef(new Map<string, Group>());
   const readCaptureGate = useRef(false);
   const setCardGroupRef = useCallback((id: string) => (node: Group | null) => {
@@ -142,6 +413,29 @@ export function App() {
       cardGroupById.current.delete(id);
     }
   }, []);
+
+  /** Avoid registering duplicate refs when the same card id is rendered as a ghost / motion overlay. */
+  const noopSetCardGroupRef = useCallback(
+    (_id: string) => (_node: Group | null) => {},
+    []
+  );
+
+  zoneFlightRef.current = zoneFlight;
+  deckFlightRef.current = deckFlight;
+
+  const visibleP1DeckIds = useMemo(() => {
+    if (deckFlight?.playerId === "p1") {
+      return deckIds.filter((id) => id !== deckFlight.cardId);
+    }
+    return deckIds;
+  }, [deckFlight, deckIds]);
+
+  const visibleP2DeckIds = useMemo(() => {
+    if (deckFlight?.playerId === "p2") {
+      return opponentDeckIds.filter((id) => id !== deckFlight.cardId);
+    }
+    return opponentDeckIds;
+  }, [deckFlight, opponentDeckIds]);
 
   const isFaceUp = useCallback(
     (id: string) => (id in faceUpById ? faceUpById[id]! : true),
@@ -168,9 +462,612 @@ export function App() {
     );
   }, []);
 
+  const runMotionDemo = useCallback(() => {
+    if (deckFlight != null || zoneFlight != null) {
+      return;
+    }
+    setMotionDemoNonce((n) => n + 1);
+    setMotionDemoActive(true);
+    push("motion demo: CardMotion deck→hand (proxy)");
+  }, [deckFlight, push, zoneFlight]);
+
+  const onMotionDemoComplete = useCallback(() => {
+    setMotionDemoActive(false);
+    push("motion demo: finished");
+  }, [push]);
+
+  const onDragTowardTableFromHand = useCallback(
+    (d: HandDragTowardTableDetail) => {
+      if (
+        zoneFlight != null ||
+        stripPlaneDrag != null ||
+        deckFlight != null
+      ) {
+        return;
+      }
+      handDragCardRef.current = d.cardId;
+      lastHandDragLocal.current = null;
+      handGhostPosRef.current = null;
+      setHandPlaneDrag({
+        cardId: d.cardId,
+        seed: { clientX: d.clientX, clientY: d.clientY },
+      });
+      push(
+        `hand drag (vertical): ${d.cardId} — release over front strip or graveyard`
+      );
+    },
+    [deckFlight, push, stripPlaneDrag, zoneFlight]
+  );
+
+  const onHandPlaneDragMove = useCallback(
+    (loc: [number, number, number]) => {
+      lastHandDragLocal.current = loc;
+      handGhostPosRef.current = loc;
+    },
+    []
+  );
+
+  const onHandPlaneEnd = useCallback(() => {
+    const cid = handDragCardRef.current;
+    handDragCardRef.current = null;
+    const loc = lastHandDragLocal.current;
+    setHandPlaneDrag(null);
+    handGhostPosRef.current = null;
+    lastHandDragLocal.current = null;
+    if (!cid || !loc) {
+      return;
+    }
+    if (isPointInGraveyardDropZonePA(loc[0]!, loc[2]!)) {
+      engine.dispatch(moveCardAction("p1", cid, demoZones.hand, demoZones.gy));
+      push(`drop → graveyard: ${cid}`);
+      return;
+    }
+    if (isPointInFrontPlayDropZonePA(loc[0]!, loc[2]!)) {
+      const onto = nearestZoneCardXZ(
+        loc[0]!,
+        loc[2]!,
+        fpIds,
+        fpCentersXZ,
+        cid,
+        STACK_DROP_RADIUS_PA
+      );
+      if (onto) {
+        const ins = moveInsertIndexOntoCard(fpIds, onto);
+        if (ins != null) {
+          const r = engine.dispatch(
+            moveCardAction(
+              "p1",
+              cid,
+              demoZones.hand,
+              demoZones.frontPlay,
+              ins
+            )
+          );
+          if (!r.error) {
+            setStackOnFp((prev) =>
+              mergeStackOntoLink(
+                getFrontPlayIds(r.state),
+                prev,
+                cid,
+                onto
+              )
+            );
+            push(`drop → front play (on ${onto}): ${cid}`);
+          }
+          return;
+        }
+      }
+      engine.dispatch(
+        moveCardAction("p1", cid, demoZones.hand, demoZones.frontPlay)
+      );
+      push(`drop → front play: ${cid}`);
+    } else {
+      push(`hand drag: cancelled (outside strip / graveyard)`);
+    }
+  }, [engine, fpCentersXZ, fpIds, push]);
+
   const inPlay = useCallback(
     (id: string) => !readMode || selectedId !== id,
     [readMode, selectedId]
+  );
+
+  const playHandToFrontPlay = useCallback(
+    (cardId: string) => {
+      if (
+        zoneFlight != null ||
+        stripPlaneDrag != null ||
+        deckFlight != null
+      ) {
+        return;
+      }
+      if (!handIds.includes(cardId)) {
+        return;
+      }
+      const g = cardGroupById.current.get(cardId);
+      const pa = playerAreaRef.current;
+      if (!g || !pa) {
+        engine.dispatch(
+          moveCardAction("p1", cardId, demoZones.hand, demoZones.frontPlay)
+        );
+        push(`hand → front play: ${cardId}`);
+        return;
+      }
+      const from = sampleCardSpatialPoseInAncestor(g, pa);
+      const nextFp = [...fpIds, cardId];
+      const to = computeFrontPlayCardPosePA(cardId, nextFp);
+      if (from.scale !== undefined) {
+        to.scale = from.scale;
+      }
+      setZoneFlight({
+        playerId: "p1",
+        cardId,
+        kind: "hand-to-front",
+        from,
+        to,
+        nonce: Date.now(),
+      });
+      push(`hand → front play (anim): ${cardId}`);
+    },
+    [
+      engine,
+      fpIds,
+      handIds,
+      push,
+      deckFlight,
+      stripPlaneDrag,
+      zoneFlight,
+    ]
+  );
+
+  const playOpponentHandToFrontPlay = useCallback(
+    (cardId: string) => {
+      if (
+        zoneFlight != null ||
+        stripPlaneDrag != null ||
+        deckFlight != null
+      ) {
+        return;
+      }
+      if (!opponentHandIds.includes(cardId)) {
+        return;
+      }
+      const g = cardGroupById.current.get(cardId);
+      const pa = opponentAreaRef.current;
+      if (!g || !pa) {
+        engine.dispatch(
+          moveCardAction(
+            "p2",
+            cardId,
+            demoZones.p2Hand,
+            demoZones.p2FrontPlay
+          )
+        );
+        push(`p2 hand → front play: ${cardId}`);
+        return;
+      }
+      const from = sampleCardSpatialPoseInAncestor(g, pa);
+      const nextFp = [...fpIdsP2, cardId];
+      const to = computeFrontPlayCardPosePA(cardId, nextFp);
+      if (from.scale !== undefined) {
+        to.scale = from.scale;
+      }
+      setZoneFlight({
+        playerId: "p2",
+        cardId,
+        kind: "hand-to-front",
+        from,
+        to,
+        nonce: Date.now(),
+      });
+      push(`p2 hand → front play (anim): ${cardId}`);
+    },
+    [
+      deckFlight,
+      engine,
+      fpIdsP2,
+      opponentHandIds,
+      push,
+      stripPlaneDrag,
+      zoneFlight,
+    ]
+  );
+
+  const returnFrontPlayToHand = useCallback(
+    (cardId: string) => {
+      if (
+        zoneFlight != null ||
+        stripPlaneDrag != null ||
+        deckFlight != null
+      ) {
+        return;
+      }
+      if (!fpIds.includes(cardId)) {
+        return;
+      }
+      const g = cardGroupById.current.get(cardId);
+      const pa = playerAreaRef.current;
+      if (!g || !pa) {
+        const insertIdx = handDropInsertIndexFromPALocal(
+          HAND_RETURN_TARGET_PA.position[0],
+          handIds
+        );
+        engine.dispatch(
+          moveCardAction(
+            "p1",
+            cardId,
+            demoZones.frontPlay,
+            demoZones.hand,
+            insertIdx
+          )
+        );
+        push(`front play → hand: ${cardId}`);
+        return;
+      }
+      const from = sampleCardSpatialPoseInAncestor(g, pa);
+      const to: CardSpatialPose = {
+        ...HAND_RETURN_TARGET_PA,
+        ...(from.scale !== undefined ? { scale: from.scale } : {}),
+      };
+      setZoneFlight({
+        playerId: "p1",
+        cardId,
+        kind: "front-to-hand",
+        from,
+        to,
+        nonce: Date.now(),
+      });
+      push(`front play → hand (anim): ${cardId}`);
+    },
+    [deckFlight, engine, fpIds, handIds, push, stripPlaneDrag, zoneFlight]
+  );
+
+  const returnOpponentFrontPlayToHand = useCallback(
+    (cardId: string) => {
+      if (
+        zoneFlight != null ||
+        stripPlaneDrag != null ||
+        deckFlight != null
+      ) {
+        return;
+      }
+      if (!fpIdsP2.includes(cardId)) {
+        return;
+      }
+      const insertIdx = handDropInsertIndexFromPALocal(
+        HAND_RETURN_TARGET_PA.position[0],
+        opponentHandIds
+      );
+      engine.dispatch(
+        moveCardAction(
+          "p2",
+          cardId,
+          demoZones.p2FrontPlay,
+          demoZones.p2Hand,
+          insertIdx
+        )
+      );
+      push(`p2 front play → hand: ${cardId}`);
+    },
+    [
+      deckFlight,
+      engine,
+      fpIdsP2,
+      opponentHandIds,
+      push,
+      stripPlaneDrag,
+      zoneFlight,
+    ]
+  );
+
+  const finishZoneFlight = useCallback(() => {
+    const z = zoneFlightRef.current;
+    if (!z) {
+      return;
+    }
+    const pid = z.playerId;
+    if (z.kind === "hand-to-front") {
+      if (pid === "p1") {
+        engine.dispatch(
+          moveCardAction("p1", z.cardId, demoZones.hand, demoZones.frontPlay)
+        );
+        push(`hand → front play (landed): ${z.cardId}`);
+      } else {
+        engine.dispatch(
+          moveCardAction(
+            "p2",
+            z.cardId,
+            demoZones.p2Hand,
+            demoZones.p2FrontPlay
+          )
+        );
+        push(`p2 hand → front play (landed): ${z.cardId}`);
+      }
+    } else {
+      const insertIdx = handDropInsertIndexFromPALocal(
+        HAND_RETURN_TARGET_PA.position[0],
+        pid === "p1"
+          ? getHandIds(engine.state)
+          : getOpponentHandIds(engine.state)
+      );
+      if (pid === "p1") {
+        engine.dispatch(
+          moveCardAction(
+            "p1",
+            z.cardId,
+            demoZones.frontPlay,
+            demoZones.hand,
+            insertIdx
+          )
+        );
+        push(`front play → hand (landed): ${z.cardId}`);
+      } else {
+        engine.dispatch(
+          moveCardAction(
+            "p2",
+            z.cardId,
+            demoZones.p2FrontPlay,
+            demoZones.p2Hand,
+            insertIdx
+          )
+        );
+        push(`p2 front play → hand (landed): ${z.cardId}`);
+      }
+    }
+    setZoneFlight(null);
+  }, [engine, push]);
+
+  const beginDeckDraw = useCallback(
+    (cardId: string, playerId: "p1" | "p2") => {
+      if (
+        zoneFlight != null ||
+        stripPlaneDrag != null ||
+        handPlaneDrag != null ||
+        deckFlight != null ||
+        motionDemoActive ||
+        readMode
+      ) {
+        return;
+      }
+      const deckZone =
+        playerId === "p1" ? demoZones.deck : demoZones.p2Deck;
+      const handZone =
+        playerId === "p1" ? demoZones.hand : demoZones.p2Hand;
+      const ids =
+        playerId === "p1" ? deckIds : opponentDeckIds;
+      const curHand =
+        playerId === "p1" ? handIds : opponentHandIds;
+      const paRoot =
+        playerId === "p1"
+          ? playerAreaRef.current
+          : opponentAreaRef.current;
+      if (!ids.includes(cardId)) {
+        return;
+      }
+      const g = cardGroupById.current.get(cardId);
+      const pa = paRoot;
+      const nextHand = [...curHand, cardId];
+      if (!g || !pa) {
+        engine.dispatch(
+          moveCardAction(playerId, cardId, deckZone, handZone)
+        );
+        setFaceUpById((prev) => ({ ...prev, [cardId]: true }));
+        push(`${playerId} deck → hand: ${cardId}`);
+        return;
+      }
+      const from = sampleCardSpatialPoseInAncestor(g, pa);
+      const to = computeHandCardPosePA(cardId, nextHand);
+      if (from.scale !== undefined) {
+        to.scale = from.scale;
+      }
+      setDeckFlight({
+        playerId,
+        cardId,
+        from,
+        to,
+        nonce: Date.now(),
+      });
+      push(`${playerId} deck → hand (anim): ${cardId}`);
+    },
+    [
+      deckFlight,
+      deckIds,
+      engine,
+      handIds,
+      opponentDeckIds,
+      opponentHandIds,
+      handPlaneDrag,
+      motionDemoActive,
+      push,
+      readMode,
+      stripPlaneDrag,
+      zoneFlight,
+      setFaceUpById,
+    ]
+  );
+
+  const finishDeckFlight = useCallback(() => {
+    const z = deckFlightRef.current;
+    if (!z) {
+      return;
+    }
+    const deckZone =
+      z.playerId === "p1" ? demoZones.deck : demoZones.p2Deck;
+    const handZone =
+      z.playerId === "p1" ? demoZones.hand : demoZones.p2Hand;
+    engine.dispatch(
+      moveCardAction(z.playerId, z.cardId, deckZone, handZone)
+    );
+    setFaceUpById((prev) => ({ ...prev, [z.cardId]: true }));
+    push(`${z.playerId} deck → hand (landed): ${z.cardId}`);
+    setDeckFlight(null);
+  }, [engine, push, setFaceUpById]);
+
+  const visibleFpIds = useMemo(() => {
+    if (
+      zoneFlight?.playerId === "p1" &&
+      zoneFlight.kind === "hand-to-front"
+    ) {
+      return layoutFpIds.filter((id) => id !== zoneFlight.cardId);
+    }
+    return layoutFpIds;
+  }, [layoutFpIds, zoneFlight]);
+
+  const visibleFpIdsP2 = useMemo(() => {
+    if (
+      zoneFlight?.playerId === "p2" &&
+      zoneFlight.kind === "hand-to-front"
+    ) {
+      return layoutFpIdsP2.filter((id) => id !== zoneFlight.cardId);
+    }
+    return layoutFpIdsP2;
+  }, [layoutFpIdsP2, zoneFlight]);
+
+  const onStripPlaneDragMove = useCallback(
+    (loc: [number, number, number]) => {
+      lastStripDragLocal.current = loc;
+      stripGhostPosRef.current = loc;
+    },
+    []
+  );
+
+  const onStripPlaneEnd = useCallback(() => {
+    const cid = stripDragCardRef.current;
+    stripDragCardRef.current = null;
+    const loc = lastStripDragLocal.current;
+    setStripPlaneDrag(null);
+    stripGhostPosRef.current = null;
+    lastStripDragLocal.current = null;
+    if (!cid || !loc) {
+      return;
+    }
+    if (isPointInHandDropZonePA(loc[0]!, loc[2]!)) {
+      const insertIdx = handDropInsertIndexFromPALocal(loc[0]!, handIds);
+      engine.dispatch(
+        moveCardAction(
+          "p1",
+          cid,
+          demoZones.frontPlay,
+          demoZones.hand,
+          insertIdx
+        )
+      );
+      push(`strip drag → hand @ ${insertIdx}: ${cid}`);
+      return;
+    }
+    if (isPointInGraveyardDropZonePA(loc[0]!, loc[2]!)) {
+      engine.dispatch(
+        moveCardAction("p1", cid, demoZones.frontPlay, demoZones.gy)
+      );
+      push(`strip drag → graveyard: ${cid}`);
+      return;
+    }
+    if (isPointInFrontPlayDropZonePA(loc[0]!, loc[2]!)) {
+      const onto = nearestZoneCardXZ(
+        loc[0]!,
+        loc[2]!,
+        fpIds,
+        fpCentersXZ,
+        cid,
+        STACK_DROP_RADIUS_PA
+      );
+      if (onto && onto !== cid) {
+        const ri = reorderIndicesForStackOnto(fpIds, cid, onto);
+        if (ri) {
+          const r = engine.dispatch(
+            reorderZoneCardsAction(
+              "p1",
+              demoZones.frontPlay,
+              ri.fromIdx,
+              ri.toIdx
+            )
+          );
+          if (!r.error) {
+            setStackOnFp((prev) =>
+              mergeStackOntoLink(
+                getFrontPlayIds(r.state),
+                prev,
+                cid,
+                onto
+              )
+            );
+            push(`strip stack on ${onto}: ${cid}`);
+          }
+          return;
+        }
+      }
+      const fromIdx = fpIds.indexOf(cid);
+      const toIdx = frontPlayReorderTargetIndex(
+        loc[0]!,
+        fpIds,
+        stackOnFp,
+        fpStackKind
+      );
+      if (fromIdx >= 0 && fromIdx !== toIdx) {
+        engine.dispatch(
+          reorderZoneCardsAction(
+            "p1",
+            demoZones.frontPlay,
+            fromIdx,
+            toIdx
+          )
+        );
+        push(`strip reorder: ${cid}`);
+      }
+      return;
+    }
+    push(`strip drag: cancelled`);
+  }, [
+    engine,
+    fpCentersXZ,
+    fpIds,
+    fpStackKind,
+    handIds,
+    push,
+    stackOnFp,
+  ]);
+
+  const onFrontPlayCardPointerDown = useCallback(
+    (e: ThreeEvent<PointerEvent>, fid: string) => {
+      if (
+        zoneFlight != null ||
+        stripPlaneDrag != null ||
+        handPlaneDrag != null ||
+        deckFlight != null
+      ) {
+        return;
+      }
+      const native = e.nativeEvent;
+      if (native.button !== 0) {
+        return;
+      }
+      const startX = native.clientX;
+      const startY = native.clientY;
+
+      const onMove = (ev: PointerEvent) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (dx * dx + dy * dy > 64) {
+          cleanup();
+          stripDragCardRef.current = fid;
+          lastStripDragLocal.current = null;
+          stripGhostPosRef.current = null;
+          setStripPlaneDrag({
+            cardId: fid,
+            seed: { clientX: ev.clientX, clientY: ev.clientY },
+          });
+        }
+      };
+      const onUp = () => {
+        cleanup();
+      };
+      function cleanup() {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      }
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [deckFlight, handPlaneDrag, stripPlaneDrag, zoneFlight]
   );
 
   const onHandOrderChange = useCallback(
@@ -182,6 +1079,23 @@ export function App() {
         reorderZoneCardsAction(
           "p1",
           demoZones.hand,
+          detail.fromIndex,
+          detail.toIndex
+        )
+      );
+    },
+    [engine]
+  );
+
+  const onHandOrderChangeP2 = useCallback(
+    (detail: { fromIndex: number; toIndex: number }) => {
+      if (detail.fromIndex === detail.toIndex) {
+        return;
+      }
+      engine.dispatch(
+        reorderZoneCardsAction(
+          "p2",
+          demoZones.p2Hand,
           detail.fromIndex,
           detail.toIndex
         )
@@ -216,11 +1130,24 @@ export function App() {
     const s = allOnTableCardIds(engine.state);
     for (let i = 0; i < 5; i++) {
       s.add(`c-deck-${i}`);
+      s.add(`c-p2-deck-${i}`);
     }
     if (selectedId && !s.has(selectedId)) {
       setSelectedId(null);
     }
   }, [engine.state, selectedId]);
+
+  useEffect(() => {
+    setStackOnFp((prev) => pruneInvalidStackLinks(fpIds, prev));
+  }, [fpIds]);
+
+  useEffect(() => {
+    setStackOnFpP2((prev) => pruneInvalidStackLinks(fpIdsP2, prev));
+  }, [fpIdsP2]);
+
+  useEffect(() => {
+    setStackOnBf((prev) => pruneInvalidStackLinks(bfIds, prev));
+  }, [bfIds]);
 
   useLayoutEffect(() => {
     if (!readMode || !selectedId || readExiting) {
@@ -272,6 +1199,11 @@ export function App() {
       if (e.key === "s" || e.key === "S") {
         showReadCard();
       }
+      if (e.key === "m" || e.key === "M") {
+        if (!e.repeat) {
+          runMotionDemo();
+        }
+      }
       if (e.key === "Escape") {
         if (readMode) {
           setReadExiting(true);
@@ -295,7 +1227,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [flipSelected, readMode, showReadCard, settingsDrawerOpen]);
+  }, [flipSelected, readMode, runMotionDemo, showReadCard, settingsDrawerOpen]);
 
   const events: CardInteractionEvents = useMemo(
     () => ({
@@ -305,17 +1237,28 @@ export function App() {
         push(`drag ${id} [${p.map((n) => n.toFixed(2)).join(", ")}]`),
       onCardDrop: (id, z) => push(`drop ${id} → ${z}`),
       onCardFlip: (id) => push(`flip done ${id}`),
-      onCardTap: (id) => push(`tap ${id}`),
+      onCardTap: (id) => {
+        if (id.startsWith("c-p2-deck-")) {
+          beginDeckDraw(id, "p2");
+          return;
+        }
+        if (id.startsWith("c-deck-")) {
+          beginDeckDraw(id, "p1");
+          return;
+        }
+        push(`tap ${id}`);
+      },
       onCardSelect: (id) => {
         setSelectedId(id);
         push(`select ${id}`);
       },
     }),
-    [push]
+    [beginDeckDraw, push]
   );
 
   const onDragBf2 = useCallback(
     (p: [number, number, number]) => {
+      lastBfDragLocal.current = p;
       setBf2Pos(p);
       events.onCardDrag(DRAG_CARD_ID, p);
     },
@@ -323,9 +1266,43 @@ export function App() {
   );
 
   const onDragEnd = useCallback(() => {
+    const loc = lastBfDragLocal.current;
+    lastBfDragLocal.current = null;
     setDragId(null);
     events.onCardDrop(DRAG_CARD_ID, "battlefield");
-  }, [events]);
+    if (!loc || !bfIds.includes(DRAG_CARD_ID)) {
+      return;
+    }
+    const onto = nearestZoneCardXZ(
+      loc[0]!,
+      loc[2]!,
+      bfIds,
+      bfCentersXZ,
+      DRAG_CARD_ID,
+      STACK_DROP_RADIUS_PA
+    );
+    if (!onto || onto === DRAG_CARD_ID) {
+      return;
+    }
+    const ri = reorderIndicesForStackOnto(bfIds, DRAG_CARD_ID, onto);
+    if (!ri) {
+      return;
+    }
+    const r = engine.dispatch(
+      reorderZoneCardsAction("p1", demoZones.bf, ri.fromIdx, ri.toIdx)
+    );
+    if (!r.error) {
+      setStackOnBf((prev) =>
+        mergeStackOntoLink(
+          getBattlefieldIds(r.state),
+          prev,
+          DRAG_CARD_ID,
+          onto
+        )
+      );
+      push(`battlefield stack on ${onto}`);
+    }
+  }, [bfCentersXZ, bfIds, engine, events, push]);
 
   /** 3D read duplicate (moved in world by `ReadCardFlight`) — not `screenOverlay`. */
   const renderReadCard3d = useCallback(
@@ -390,25 +1367,36 @@ export function App() {
           playmatGrid={playmatGridOn && showPlaymatSurface}
         >
           <Suspense fallback={null}>
-            <PlayerArea side="near" position={[0, 0, 2.3]}>
+            <PlayerArea ref={playerAreaRef} side="near" position={[0, 0, 2.3]}>
               <HandZone id="p1-hand" position={[-0.2, 0, 1.1]}>
                 <ReorderableCardFan
-                  cardIds={handIds}
+                  cardIds={layoutHandIdsForFan}
                   onHandOrderChange={onHandOrderChange}
                   handZoneId={demoZones.hand}
-                  renderCard={(hid) => (
-                    <DemoCard3dTable
-                      id={hid}
-                      state={engine.state}
-                      setCardGroupRef={setCardGroupRef}
-                      isFaceUp={isFaceUp}
-                      selectedId={selectedId}
-                      inPlay={inPlay}
-                      onToggleFace={toggleFace}
-                      oneHighlight={oneHighlight}
-                      oneTapped={oneTapped}
-                    />
-                  )}
+                  onDragTowardTable={onDragTowardTableFromHand}
+                  renderCard={(hid) =>
+                    zoneFlight?.playerId === "p1" &&
+                    zoneFlight.kind === "front-to-hand" &&
+                    hid === zoneFlight.cardId ? (
+                      <group />
+                    ) : deckFlight?.playerId === "p1" &&
+                      hid === deckFlight.cardId ? (
+                      <group />
+                    ) : (
+                      <DemoCard3dTable
+                        id={hid}
+                        state={engine.state}
+                        setCardGroupRef={setCardGroupRef}
+                        isFaceUp={isFaceUp}
+                        selectedId={selectedId}
+                        inPlay={inPlay}
+                        onToggleFace={toggleFace}
+                        oneHighlight={oneHighlight}
+                        oneTapped={oneTapped}
+                        onCardDoubleClick={() => playHandToFrontPlay(hid)}
+                      />
+                    )
+                  }
                   radius={1.2}
                   style="ecard"
                   zBowl={0.004}
@@ -416,27 +1404,139 @@ export function App() {
                 />
               </HandZone>
 
+              <Zone
+                id={demoZones.frontPlay}
+                zoneKind="battlefield"
+                layout="row"
+                position={FRONT_PLAY_ZONE_PA.position}
+              >
+                <FrontPlayStripPad />
+                <group>
+                  {visibleFpIds.map((fid) => (
+                    <group
+                      key={fid}
+                      position={fpOffsets[fid] ?? [0, 0, 0]}
+                    >
+                      <DemoCard3dTable
+                        id={fid}
+                        state={engine.state}
+                        setCardGroupRef={setCardGroupRef}
+                        isFaceUp={isFaceUp}
+                        selectedId={selectedId}
+                        inPlay={inPlay}
+                        onToggleFace={toggleFace}
+                        oneHighlight={oneHighlight}
+                        oneTapped={oneTapped}
+                        onCardPointerDown={(e) =>
+                          onFrontPlayCardPointerDown(e, fid)
+                        }
+                        onCardDoubleClick={() => returnFrontPlayToHand(fid)}
+                      />
+                    </group>
+                  ))}
+                </group>
+              </Zone>
+
+              {zoneFlight?.playerId === "p1" ? (
+                <CardMotion
+                  key={zoneFlight.nonce}
+                  active
+                  from={zoneFlight.from}
+                  to={zoneFlight.to}
+                  {...CARD_MOTION_PRESETS.deckToHand}
+                  onComplete={finishZoneFlight}
+                  renderOrder={42}
+                >
+                  <DemoCard3dTable
+                    id={zoneFlight.cardId}
+                    state={engine.state}
+                    setCardGroupRef={noopSetCardGroupRef}
+                    isFaceUp={isFaceUp}
+                    selectedId={null}
+                    inPlay={inPlay}
+                    onToggleFace={toggleFace}
+                    oneHighlight={false}
+                    oneTapped={false}
+                    pickDisabled
+                  />
+                </CardMotion>
+              ) : null}
+
+              {deckFlight?.playerId === "p1" ? (
+                <CardMotion
+                  key={deckFlight.nonce}
+                  active
+                  from={deckFlight.from}
+                  to={deckFlight.to}
+                  {...CARD_MOTION_PRESETS.deckToHand}
+                  flip={flipDealRevealFirst(true)}
+                  onComplete={finishDeckFlight}
+                  renderOrder={43}
+                >
+                  {(m) => (
+                    <DemoCard3dTable
+                      id={deckFlight.cardId}
+                      state={engine.state}
+                      setCardGroupRef={noopSetCardGroupRef}
+                      isFaceUp={isFaceUp}
+                      motionFaceUp={m.faceUp}
+                      selectedId={null}
+                      inPlay={inPlay}
+                      onToggleFace={toggleFace}
+                      oneHighlight={false}
+                      oneTapped={false}
+                      pickDisabled
+                      deckDrawFlight
+                    />
+                  )}
+                </CardMotion>
+              ) : null}
+
               <DeckZone id="p1-deck" position={[-4.2, 0, 0.2]}>
                 <CardStack yStep={0.025}>
-                  {Array.from({ length: 5 }, (_, i) => {
-                    const did = `c-deck-${i}` as const;
-                    return (
-                      <Card
-                        key={i}
-                        ref={setCardGroupRef(did)}
-                        id={did}
-                        face={face(1)}
-                        back={BACK}
-                        faceUp={false}
-                        selected={selectedId === did}
-                        visible={inPlay(did)}
-                      />
-                    );
-                  })}
+                  {visibleP1DeckIds.map((did) => (
+                    <Card
+                      key={did}
+                      ref={setCardGroupRef(did)}
+                      id={did}
+                      face={face(1)}
+                      back={BACK}
+                      faceUp={false}
+                      selected={selectedId === did}
+                      visible={inPlay(did)}
+                    />
+                  ))}
                 </CardStack>
               </DeckZone>
 
-              <GraveyardZone id="p1-grave" position={[3.2, 0, 0.1]}>
+              {motionDemoActive ? (
+                <CardMotion
+                  key={motionDemoNonce}
+                  active
+                  from={MOTION_DEMO_FROM}
+                  to={MOTION_DEMO_TO}
+                  {...CARD_MOTION_PRESETS.deckToHand}
+                  flip={flipDeal(true)}
+                  onComplete={onMotionDemoComplete}
+                  renderOrder={32}
+                >
+                  {(m) => (
+                    <Card
+                      id="motion-demo-proxy"
+                      face={face(1)}
+                      back={BACK}
+                      faceUp={m.faceUp}
+                      cardScale={1}
+                      pointerTilt={false}
+                    />
+                  )}
+                </CardMotion>
+              ) : null}
+
+              <GraveyardZone
+                id="p1-grave"
+                position={[...GRAVEYARD_ZONE_PA_POSITION]}
+              >
                 <CardPile>
                   {gyIds.map((gid) => (
                     <DemoCard3dTable
@@ -454,12 +1554,263 @@ export function App() {
                   ))}
                 </CardPile>
               </GraveyardZone>
+
+              {handPlaneDrag != null ? (
+                <GhostFollowGroup
+                  posRef={handGhostPosRef}
+                  yLift={0.08}
+                  renderOrder={48}
+                >
+                  <DemoCard3dTable
+                    id={handPlaneDrag.cardId}
+                    state={engine.state}
+                    setCardGroupRef={noopSetCardGroupRef}
+                    isFaceUp={isFaceUp}
+                    selectedId={null}
+                    inPlay={inPlay}
+                    onToggleFace={toggleFace}
+                    oneHighlight={false}
+                    oneTapped={false}
+                    pickDisabled
+                  />
+                </GhostFollowGroup>
+              ) : null}
+
+              {stripPlaneDrag != null ? (
+                <GhostFollowGroup
+                  posRef={stripGhostPosRef}
+                  yLift={0.08}
+                  renderOrder={46}
+                >
+                  <DemoCard3dTable
+                    id={stripPlaneDrag.cardId}
+                    state={engine.state}
+                    setCardGroupRef={noopSetCardGroupRef}
+                    isFaceUp={isFaceUp}
+                    selectedId={null}
+                    inPlay={inPlay}
+                    onToggleFace={toggleFace}
+                    oneHighlight={false}
+                    oneTapped={false}
+                    pickDisabled
+                  />
+                </GhostFollowGroup>
+              ) : null}
             </PlayerArea>
+
+            <PlayerArea
+              ref={opponentAreaRef}
+              side="far"
+              position={[0, 0, -2.3]}
+              rotation={[0, Math.PI, 0]}
+            >
+              <HandZone id="p2-hand" position={[-0.2, 0, 1.1]}>
+                <ReorderableCardFan
+                  cardIds={layoutHandIdsForFanP2}
+                  onHandOrderChange={onHandOrderChangeP2}
+                  handZoneId={demoZones.p2Hand}
+                  renderCard={(hid) =>
+                    deckFlight?.playerId === "p2" &&
+                    hid === deckFlight.cardId ? (
+                      <group />
+                    ) : zoneFlight?.playerId === "p2" &&
+                      zoneFlight.kind === "hand-to-front" &&
+                      hid === zoneFlight.cardId ? (
+                      <group />
+                    ) : zoneFlight?.playerId === "p2" &&
+                      zoneFlight.kind === "front-to-hand" &&
+                      hid === zoneFlight.cardId ? (
+                      <group />
+                    ) : (
+                      <DemoCard3dTable
+                        id={hid}
+                        state={engine.state}
+                        setCardGroupRef={setCardGroupRef}
+                        isFaceUp={isFaceUp}
+                        selectedId={selectedId}
+                        inPlay={inPlay}
+                        onToggleFace={toggleFace}
+                        oneHighlight={oneHighlight}
+                        oneTapped={oneTapped}
+                        hideCardFace
+                        opponentReadableOrientation
+                        onCardDoubleClick={() =>
+                          playOpponentHandToFrontPlay(hid)
+                        }
+                      />
+                    )
+                  }
+                  radius={1.2}
+                  style="ecard"
+                  zBowl={0.004}
+                  maxRollZ={0.05}
+                />
+              </HandZone>
+
+              <Zone
+                id={demoZones.p2FrontPlay}
+                zoneKind="battlefield"
+                layout="row"
+                position={FRONT_PLAY_ZONE_PA.position}
+              >
+                <FrontPlayStripPad />
+                <group>
+                  {visibleFpIdsP2.map((fid) => (
+                    <group
+                      key={fid}
+                      position={fpOffsetsP2[fid] ?? [0, 0, 0]}
+                    >
+                      <DemoCard3dTable
+                        id={fid}
+                        state={engine.state}
+                        setCardGroupRef={setCardGroupRef}
+                        isFaceUp={isFaceUp}
+                        selectedId={selectedId}
+                        inPlay={inPlay}
+                        onToggleFace={toggleFace}
+                        oneHighlight={oneHighlight}
+                        oneTapped={oneTapped}
+                        opponentReadableOrientation
+                        onCardDoubleClick={() =>
+                          returnOpponentFrontPlayToHand(fid)
+                        }
+                      />
+                    </group>
+                  ))}
+                </group>
+              </Zone>
+
+              {zoneFlight?.playerId === "p2" &&
+              zoneFlight.kind === "hand-to-front" ? (
+                <CardMotion
+                  key={zoneFlight.nonce}
+                  active
+                  from={zoneFlight.from}
+                  to={zoneFlight.to}
+                  {...CARD_MOTION_PRESETS.deckToHand}
+                  flip={flipDealRevealFirst(true)}
+                  onComplete={finishZoneFlight}
+                  renderOrder={42}
+                >
+                  {(m) => (
+                    <DemoCard3dTable
+                      id={zoneFlight.cardId}
+                      state={engine.state}
+                      setCardGroupRef={noopSetCardGroupRef}
+                      isFaceUp={isFaceUp}
+                      motionFaceUp={m.faceUp}
+                      selectedId={null}
+                      inPlay={inPlay}
+                      onToggleFace={toggleFace}
+                      oneHighlight={false}
+                      oneTapped={false}
+                      pickDisabled
+                      opponentReadableOrientation
+                    />
+                  )}
+                </CardMotion>
+              ) : null}
+
+              {deckFlight?.playerId === "p2" ? (
+                <CardMotion
+                  key={deckFlight.nonce}
+                  active
+                  from={deckFlight.from}
+                  to={deckFlight.to}
+                  {...CARD_MOTION_PRESETS.deckToHand}
+                  flip={flipDealRevealFirst(false)}
+                  onComplete={finishDeckFlight}
+                  renderOrder={43}
+                >
+                  {(m) => (
+                    <DemoCard3dTable
+                      id={deckFlight.cardId}
+                      state={engine.state}
+                      setCardGroupRef={noopSetCardGroupRef}
+                      isFaceUp={isFaceUp}
+                      motionFaceUp={m.faceUp}
+                      selectedId={null}
+                      inPlay={inPlay}
+                      onToggleFace={toggleFace}
+                      oneHighlight={false}
+                      oneTapped={false}
+                      pickDisabled
+                      deckDrawFlight
+                      hideCardFace
+                      opponentReadableOrientation
+                    />
+                  )}
+                </CardMotion>
+              ) : null}
+
+              <DeckZone id="p2-deck" position={[-4.2, 0, 0.2]}>
+                <CardStack yStep={0.025}>
+                  {visibleP2DeckIds.map((did) => (
+                    <Card
+                      key={did}
+                      ref={setCardGroupRef(did)}
+                      id={did}
+                      rotation={[0, Math.PI, 0]}
+                      face={face(1)}
+                      back={BACK}
+                      faceUp={false}
+                      selected={selectedId === did}
+                      visible={inPlay(did)}
+                    />
+                  ))}
+                </CardStack>
+              </DeckZone>
+
+              <GraveyardZone
+                id="p2-grave"
+                position={[...GRAVEYARD_ZONE_PA_POSITION]}
+              >
+                <CardPile>
+                  {opponentGyIds.map((gid) => (
+                    <DemoCard3dTable
+                      key={gid}
+                      id={gid}
+                      state={engine.state}
+                      setCardGroupRef={setCardGroupRef}
+                      isFaceUp={isFaceUp}
+                      selectedId={selectedId}
+                      inPlay={inPlay}
+                      onToggleFace={toggleFace}
+                      oneHighlight={oneHighlight}
+                      oneTapped={oneTapped}
+                      opponentReadableOrientation
+                    />
+                  ))}
+                </CardPile>
+              </GraveyardZone>
+            </PlayerArea>
+
+            <TablePlaneDrag
+              active={handPlaneDrag != null}
+              planeY={0.08}
+              parentRef={playerAreaRef}
+              seedPointerClient={handPlaneDrag?.seed ?? null}
+              onDrag={onHandPlaneDragMove}
+              onEnd={onHandPlaneEnd}
+            />
+
+            <TablePlaneDrag
+              active={stripPlaneDrag != null}
+              planeY={0.08}
+              parentRef={playerAreaRef}
+              seedPointerClient={stripPlaneDrag?.seed ?? null}
+              onDrag={onStripPlaneDragMove}
+              onEnd={onStripPlaneEnd}
+            />
 
             <BattlefieldZone id="battlefield" position={[0, 0, -0.5]}>
               <group ref={battlefieldGroupRef}>
                 {bfIds.map((bid, bfi) => {
-                  const pos = getBattlefieldLocalPosition(bid, bfIds, bf2Pos);
+                  const pos =
+                    bid === DRAG_CARD_ID
+                      ? bf2Pos
+                      : bfOffsets[bid] ??
+                        getBattlefieldLocalPosition(bid, bfIds, bf2Pos);
                   return (
                     <group key={bid} position={pos}>
                       <DemoCard3dTable
@@ -509,31 +1860,14 @@ export function App() {
               />
             </BattlefieldZone>
 
-            <StackZone id="stack" position={[-0.2, 0, -1.2]}>
-              <CardStack yStep={0.03}>
-                {stack3dIds.map((sid) => (
-                  <DemoCard3dTable
-                    key={sid}
-                    id={sid}
-                    state={engine.state}
-                    setCardGroupRef={setCardGroupRef}
-                    isFaceUp={isFaceUp}
-                    selectedId={selectedId}
-                    inPlay={inPlay}
-                    onToggleFace={toggleFace}
-                    oneHighlight={oneHighlight}
-                    oneTapped={oneTapped}
-                  />
-                ))}
-              </CardStack>
-            </StackZone>
-
             {readMode && readSnapshot && selectedId && readSnapshot.id === selectedId ? (
               <ReadCardFlight
                 key={readFlightKey}
                 snapshot={readSnapshot}
                 toPos={READ_BILLBOARD.position}
-                toScaleU={READ_BILLBOARD.scale * demoCardScaleById(selectedId)}
+                toScaleU={
+                  READ_BILLBOARD.scale * demoCardScaleById(selectedId, engine.state)
+                }
                 leaving={readExiting}
                 onReturnComplete={onReadReturnComplete}
               >
@@ -729,6 +2063,47 @@ export function App() {
           >
             Reset table
           </button>
+          <label
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 1fr",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 8,
+            }}
+          >
+            <span style={{ opacity: 0.85 }}>Front-play piles</span>
+            <select
+              value={fpStackKind}
+              onChange={(e) =>
+                setFpStackKind(e.target.value as StackPresentationKind)
+              }
+            >
+              <option value="spread">spread</option>
+              <option value="vertical">vertical</option>
+              <option value="overlap">overlap</option>
+            </select>
+          </label>
+          <label
+            style={{
+              display: "grid",
+              gridTemplateColumns: "120px 1fr",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span style={{ opacity: 0.85 }}>Battlefield piles</span>
+            <select
+              value={bfStackKind}
+              onChange={(e) =>
+                setBfStackKind(e.target.value as StackPresentationKind)
+              }
+            >
+              <option value="spread">spread</option>
+              <option value="vertical">vertical</option>
+              <option value="overlap">overlap</option>
+            </select>
+          </label>
         </p>
         <p
           style={{
@@ -836,6 +2211,15 @@ export function App() {
           </code>
         </p>
         <p>
+          <button type="button" onClick={runMotionDemo}>
+            Run deck→hand motion demo
+          </button>
+          <span style={{ marginLeft: 8, opacity: 0.85 }}>
+            Uses <code>CardMotion</code> + presets (<code>CARD_MOTION_PRESETS.deckToHand</code>,{" "}
+            <code>flipDeal(true)</code>). Logs on start/end.
+          </span>
+        </p>
+        <p>
           <strong>TCGL v0</strong> — presentation + interaction. Hover, tilt, click/double-click,
           drag on the battlefield sample, <kbd>F</kbd> flips the selected card.
         </p>
@@ -849,7 +2233,7 @@ export function App() {
           }}
         >
           <span style={{ opacity: 0.85 }}>
-            Card VFX (left battlefield creature): same preset and trigger row — 1 damage · 2 heal · 3
+            Card VFX (first card on battlefield when you play one): same preset and trigger row — 1 damage · 2 heal · 3
             buff · 4 debuff · 5 generic
           </span>
           <span style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
@@ -878,8 +2262,11 @@ export function App() {
         </p>
         <p>
           <kbd>H</kbd> outline · <kbd>T</kbd> tap · <kbd>D</kbd> drop overlay · <kbd>F</kbd> flip
-          selected · <kbd>1</kbd>–<kbd>5</kbd> card VFX · <kbd>S</kbd> read · <kbd>Esc</kbd> exit
-          read · double-click to flip
+          selected · hand→strip: <strong>double-click animates</strong> or drag mostly{" "}
+          <strong>up/down</strong> then drop · strip: <strong>click-drag</strong> to reorder or drag toward
+          hand to drop · double-click strip→hand (animated) · <kbd>M</kbd> motion demo ·{" "}
+          <kbd>1</kbd>–<kbd>5</kbd> card VFX · <kbd>S</kbd> read · <kbd>Esc</kbd> exit read ·
+          double-click to flip
         </p>
         <p style={{ opacity: 0.85 }}>
           <kbd>S</kbd> / <kbd>Esc</kbd> — with a card selected, <kbd>S</kbd> moves that 3D card in world

@@ -10,6 +10,11 @@ type Props = {
   onDrag: (local: [number, number, number]) => void;
   onEnd: () => void;
   parentRef: RefObject<Group | null>;
+  /**
+   * When `active` turns true (e.g. hand vertical-drag start), project this once so the ghost has an
+   * initial hit before the first `pointermove`.
+   */
+  seedPointerClient?: { clientX: number; clientY: number } | null;
 };
 
 /**
@@ -22,6 +27,7 @@ export function TablePlaneDrag({
   onDrag,
   onEnd,
   parentRef,
+  seedPointerClient,
 }: Props) {
   const { camera, gl } = useThree();
   const worldHit = useRef(new Vector3());
@@ -38,10 +44,10 @@ export function TablePlaneDrag({
       return;
     }
     const el = gl.domElement;
-    const move = (e: PointerEvent) => {
+    const hitFromClient = (clientX: number, clientY: number) => {
       const rect = el.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      const yNdc = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+      const yNdc = -((clientY - rect.top) / rect.height) * 2 + 1;
       ndc.set(x, yNdc);
       raycaster.setFromCamera(ndc, camera as unknown as Camera);
       if (raycaster.ray.intersectPlane(plane, worldHit.current)) {
@@ -54,6 +60,12 @@ export function TablePlaneDrag({
         onDrag([localHit.current.x, 0, localHit.current.z]);
       }
     };
+    const move = (e: PointerEvent) => {
+      hitFromClient(e.clientX, e.clientY);
+    };
+    if (seedPointerClient) {
+      hitFromClient(seedPointerClient.clientX, seedPointerClient.clientY);
+    }
     const up = () => onEnd();
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -61,6 +73,17 @@ export function TablePlaneDrag({
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [active, camera, gl, ndc, onDrag, onEnd, parentRef, plane, raycaster]);
+  }, [
+    active,
+    camera,
+    gl,
+    ndc,
+    onDrag,
+    onEnd,
+    parentRef,
+    plane,
+    raycaster,
+    seedPointerClient,
+  ]);
   return null;
 }

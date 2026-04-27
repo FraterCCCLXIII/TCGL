@@ -68,6 +68,11 @@ export type CardProps = CardView & {
    * HUD: no “lay flat on the table” −90° X, unlit albedo, no SDF rim. Table cards omit this.
    */
   screenOverlay?: boolean;
+  /**
+   * When `disabled`, cards normally fade to ~42% opacity. Set **`true`** so disabled cards stay fully
+   * opaque while remaining non-interactive (e.g. drag ghosts and zone-motion overlays).
+   */
+  opaqueWhenDisabled?: boolean;
 } & R3FGroupProps;
 
 /**
@@ -106,6 +111,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
   onCardPointerUp,
   pointerTilt = true,
   screenOverlay = false,
+  opaqueWhenDisabled = false,
   ...groupProps
 }: CardProps,
   ref: Ref<Group>
@@ -183,7 +189,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
     rotX: disabled || !pointerTilt ? 0 : tilt.x * maxTilt,
     rotY: disabled || !pointerTilt ? 0 : tilt.y * maxTilt,
     rotZ: disabled ? 0 : tapRz,
-    cardOpacity: disabled ? 0.42 : 1,
+    cardOpacity: disabled && !opaqueWhenDisabled ? 0.42 : 1,
     rimAlpha: showRim ? rimStrength : 0,
     config: { mass: 0.45, tension: 400, friction: 28 },
   });

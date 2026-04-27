@@ -17,6 +17,7 @@ export {
   ReorderableCardFan,
   type ReorderableCardFanProps,
   type HandReorderDetail,
+  type HandDragTowardTableDetail,
 } from "./components/ReorderableCardFan";
 export { CardStack, type CardStackProps } from "./components/CardStack";
 export { CardPile, type CardPileProps } from "./components/CardPile";
@@ -52,3 +53,5 @@ export {
   seedCardVfxBurst,
   type CardVfxKind,
 } from "./vfx/cardVfxPresets";
+export * from "./motion";
+export { CardMotion, type CardMotionProps } from "./components/CardMotion";

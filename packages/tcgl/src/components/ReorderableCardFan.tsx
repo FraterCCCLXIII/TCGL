@@ -19,6 +19,14 @@ export type HandReorderDetail = {
   handZoneId?: string;
 };
 
+/** Fired when the pointer crosses the reorder threshold but motion is primarily vertical — host can start a drag onto the table instead of reordering. */
+export type HandDragTowardTableDetail = {
+  cardId: string;
+  clientX: number;
+  clientY: number;
+  pointerId: number;
+};
+
 export type ReorderableCardFanProps = {
   cardIds: readonly string[];
   onHandOrderChange: (detail: HandReorderDetail) => void;
@@ -26,6 +34,14 @@ export type ReorderableCardFanProps = {
   renderCard: (cardId: string) => ReactElement;
   reorderDragThresholdPx?: number;
   dragLiftY?: number;
+  /**
+   * When set, if the pointer exceeds the reorder distance with **`|Δy| > ratio × |Δx|`**, reorder is
+   * skipped and this runs so you can drag the card toward another zone (e.g. front play row).
+   * @default 1.35
+   */
+  dragTowardTableRatio?: number;
+  /** Drag-away gesture — reorder fan session ends without committing an order change. */
+  onDragTowardTable?: (detail: HandDragTowardTableDetail) => void;
   /**
    * Frame-rate–independent smoothing **λ** for card follow toward the fan layout.
    * **Lower** = slower, smoother; **higher** = snappier. @default 9
@@ -110,6 +126,8 @@ export function ReorderableCardFan({
   dragLiftY = 0.12,
   reorderDamping = 9,
   previewIndexDamping = 7.5,
+  dragTowardTableRatio = 1.35,
+  onDragTowardTable,
   radius,
   arc,
   style = "ecard",
@@ -372,6 +390,29 @@ export function ReorderableCardFan({
           if (mdx * mdx + mdy * mdy < reorderDragThresholdPx * reorderDragThresholdPx) {
             return;
           }
+          if (
+            onDragTowardTable &&
+            Math.abs(mdy) > Math.abs(mdx) * dragTowardTableRatio
+          ) {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", finish);
+            window.removeEventListener("pointercancel", finish);
+            drag.current = null;
+            if (dom && typeof (dom as HTMLCanvasElement).releasePointerCapture === "function") {
+              try {
+                (dom as HTMLCanvasElement).releasePointerCapture(d.pointerId);
+              } catch {
+                /* no capture */
+              }
+            }
+            onDragTowardTable({
+              cardId: d.startId,
+              clientX: ev.clientX,
+              clientY: ev.clientY,
+              pointerId: ev.pointerId,
+            });
+            return;
+          }
           d.armed = true;
           previewToFloatRef.current = d.from;
         }
@@ -431,6 +472,8 @@ export function ReorderableCardFan({
       onHandOrderChange,
       handZoneId,
       reorderDragThresholdPx,
+      dragTowardTableRatio,
+      onDragTowardTable,
       frameloop,
     ]
   );
