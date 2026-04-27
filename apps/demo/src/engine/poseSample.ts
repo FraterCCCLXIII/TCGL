@@ -3,6 +3,33 @@ import type { Group } from "three";
 import { Euler, Matrix4, Quaternion, Vector3 } from "three";
 
 /**
+ * Remaps a pose expressed in legacy PlayerArea hand coordinates into {@link playerArea}'s local
+ * space using the **world** transform of {@link handHudRoot} (viewport-/camera-attached hand rig).
+ * Keeps deck→hand / strip→hand CardMotion nodes parented under PlayerArea working while hands render
+ * under the camera.
+ */
+export function mapHandPaPoseToPlayerAreaMotionSpace(
+  posePa: CardSpatialPose,
+  handHudRoot: Group,
+  playerArea: Group
+): CardSpatialPose {
+  handHudRoot.updateMatrixWorld(true);
+  playerArea.updateMatrixWorld(true);
+  const v = new Vector3(
+    posePa.position[0],
+    posePa.position[1],
+    posePa.position[2]
+  );
+  const world = v.applyMatrix4(handHudRoot.matrixWorld);
+  const invPa = new Matrix4().copy(playerArea.matrixWorld).invert();
+  const localPa = world.applyMatrix4(invPa);
+  return {
+    ...posePa,
+    position: [localPa.x, localPa.y, localPa.z],
+  };
+}
+
+/**
  * World matrices of `cardRoot` and `ancestor` must be current — callers should run
  * `updateMatrixWorld(true)` if needed (handled here).
  */

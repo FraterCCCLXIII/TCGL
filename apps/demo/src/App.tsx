@@ -49,7 +49,10 @@ import {
 import { demoZones } from "./engine/seedDemoGame";
 import { useDemoSession } from "./engine/useDemoSession";
 import { GhostFollowGroup } from "./GhostFollowGroup";
-import { sampleCardSpatialPoseInAncestor } from "./engine/poseSample";
+import {
+  mapHandPaPoseToPlayerAreaMotionSpace,
+  sampleCardSpatialPoseInAncestor,
+} from "./engine/poseSample";
 import {
   mergeStackOntoLink,
   moveInsertIndexOntoCard,
@@ -95,6 +98,7 @@ import {
   face,
   BACK,
 } from "./DemoCard3d";
+import { CameraAttachedHandsRoot } from "./ViewportHandsLayer";
 
 /**
  * World pose for read-mode: billboard + uniform scale. Center Y is high enough that the full
@@ -398,6 +402,9 @@ export function App() {
   const playerAreaRef = useRef<Group>(null);
   /** Far opponent `PlayerArea` — deck draw pose sampling (same local layout as near, mirrored by π yaw). */
   const opponentAreaRef = useRef<Group>(null);
+  /** Camera-attached HUD roots — legacy PA-space hand poses map through these for CardMotion under PlayerArea. */
+  const viewportP1HandHudRef = useRef<Group>(null);
+  const viewportP2HandHudRef = useRef<Group>(null);
   const lastHandDragLocal = useRef<[number, number, number] | null>(null);
   const handDragCardRef = useRef<string | null>(null);
   const lastStripDragLocal = useRef<[number, number, number] | null>(null);
@@ -704,10 +711,14 @@ export function App() {
         return;
       }
       const from = sampleCardSpatialPoseInAncestor(g, pa);
-      const to: CardSpatialPose = {
+      let to: CardSpatialPose = {
         ...HAND_RETURN_TARGET_PA,
         ...(from.scale !== undefined ? { scale: from.scale } : {}),
       };
+      const hud = viewportP1HandHudRef.current;
+      if (hud && pa) {
+        to = mapHandPaPoseToPlayerAreaMotionSpace(to, hud, pa);
+      }
       setZoneFlight({
         playerId: "p1",
         cardId,
@@ -855,7 +866,14 @@ export function App() {
         return;
       }
       const from = sampleCardSpatialPoseInAncestor(g, pa);
-      const to = computeHandCardPosePA(cardId, nextHand);
+      const hudRoot =
+        playerId === "p1"
+          ? viewportP1HandHudRef.current
+          : viewportP2HandHudRef.current;
+      let to = computeHandCardPosePA(cardId, nextHand);
+      if (hudRoot && pa) {
+        to = mapHandPaPoseToPlayerAreaMotionSpace(to, hudRoot, pa);
+      }
       if (from.scale !== undefined) {
         to.scale = from.scale;
       }
@@ -1356,18 +1374,9 @@ export function App() {
         <CameraRig position={cameraPosition} fov={40} />
         <LightingRig />
 
-        <Playmat
-          size={[16, 14]}
-          y={0}
-          tilt={tableTilt}
-          splitSides={{ near: "#55555d", far: "#65656d" }}
-          showCenterSeam
-          showSurface={showPlaymatSurface}
-          shadowCatcher={use2dPlaymatBackdrop}
-          playmatGrid={playmatGridOn && showPlaymatSurface}
-        >
-          <Suspense fallback={null}>
-            <PlayerArea ref={playerAreaRef} side="near" position={[0, 0, 2.3]}>
+        <Suspense fallback={null}>
+          <CameraAttachedHandsRoot>
+            <group ref={viewportP1HandHudRef} position={[0, -1.35, -5.2]}>
               <HandZone id="p1-hand" position={[-0.2, 0, 1.1]}>
                 <ReorderableCardFan
                   cardIds={layoutHandIdsForFan}
@@ -1403,7 +1412,71 @@ export function App() {
                   maxRollZ={0.05}
                 />
               </HandZone>
+            </group>
 
+            <group
+              ref={viewportP2HandHudRef}
+              position={[0, 1.35, -5.2]}
+              rotation={[0, Math.PI, 0]}
+            >
+              <HandZone id="p2-hand" position={[-0.2, 0, 1.1]}>
+                <ReorderableCardFan
+                  cardIds={layoutHandIdsForFanP2}
+                  onHandOrderChange={onHandOrderChangeP2}
+                  handZoneId={demoZones.p2Hand}
+                  renderCard={(hid) =>
+                    deckFlight?.playerId === "p2" &&
+                    hid === deckFlight.cardId ? (
+                      <group />
+                    ) : zoneFlight?.playerId === "p2" &&
+                      zoneFlight.kind === "hand-to-front" &&
+                      hid === zoneFlight.cardId ? (
+                      <group />
+                    ) : zoneFlight?.playerId === "p2" &&
+                      zoneFlight.kind === "front-to-hand" &&
+                      hid === zoneFlight.cardId ? (
+                      <group />
+                    ) : (
+                      <DemoCard3dTable
+                        id={hid}
+                        state={engine.state}
+                        setCardGroupRef={setCardGroupRef}
+                        isFaceUp={isFaceUp}
+                        selectedId={selectedId}
+                        inPlay={inPlay}
+                        onToggleFace={toggleFace}
+                        oneHighlight={oneHighlight}
+                        oneTapped={oneTapped}
+                        hideCardFace
+                        opponentReadableOrientation
+                        onCardDoubleClick={() =>
+                          playOpponentHandToFrontPlay(hid)
+                        }
+                      />
+                    )
+                  }
+                  radius={1.2}
+                  style="ecard"
+                  zBowl={0.004}
+                  maxRollZ={0.05}
+                />
+              </HandZone>
+            </group>
+          </CameraAttachedHandsRoot>
+        </Suspense>
+
+        <Playmat
+          size={[16, 14]}
+          y={0}
+          tilt={tableTilt}
+          splitSides={{ near: "#55555d", far: "#65656d" }}
+          showCenterSeam
+          showSurface={showPlaymatSurface}
+          shadowCatcher={use2dPlaymatBackdrop}
+          playmatGrid={playmatGridOn && showPlaymatSurface}
+        >
+          <Suspense fallback={null}>
+            <PlayerArea ref={playerAreaRef} side="near" position={[0, 0, 2.3]}>
               <Zone
                 id={demoZones.frontPlay}
                 zoneKind="battlefield"
@@ -1604,49 +1677,6 @@ export function App() {
               position={[0, 0, -2.3]}
               rotation={[0, Math.PI, 0]}
             >
-              <HandZone id="p2-hand" position={[-0.2, 0, 1.1]}>
-                <ReorderableCardFan
-                  cardIds={layoutHandIdsForFanP2}
-                  onHandOrderChange={onHandOrderChangeP2}
-                  handZoneId={demoZones.p2Hand}
-                  renderCard={(hid) =>
-                    deckFlight?.playerId === "p2" &&
-                    hid === deckFlight.cardId ? (
-                      <group />
-                    ) : zoneFlight?.playerId === "p2" &&
-                      zoneFlight.kind === "hand-to-front" &&
-                      hid === zoneFlight.cardId ? (
-                      <group />
-                    ) : zoneFlight?.playerId === "p2" &&
-                      zoneFlight.kind === "front-to-hand" &&
-                      hid === zoneFlight.cardId ? (
-                      <group />
-                    ) : (
-                      <DemoCard3dTable
-                        id={hid}
-                        state={engine.state}
-                        setCardGroupRef={setCardGroupRef}
-                        isFaceUp={isFaceUp}
-                        selectedId={selectedId}
-                        inPlay={inPlay}
-                        onToggleFace={toggleFace}
-                        oneHighlight={oneHighlight}
-                        oneTapped={oneTapped}
-                        hideCardFace
-                        opponentReadableOrientation
-                        onCardDoubleClick={() =>
-                          playOpponentHandToFrontPlay(hid)
-                        }
-                      />
-                    )
-                  }
-                  radius={1.2}
-                  style="ecard"
-                  zBowl={0.004}
-                  maxRollZ={0.05}
-                />
-              </HandZone>
-
               <Zone
                 id={demoZones.p2FrontPlay}
                 zoneKind="battlefield"
