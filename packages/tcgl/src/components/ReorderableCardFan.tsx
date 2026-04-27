@@ -3,14 +3,12 @@ import {
   useCallback,
   useMemo,
   useRef,
-  useState,
   cloneElement,
   isValidElement,
   type ReactElement,
 } from "react";
 import { Vector3, type Group, MathUtils } from "three";
 import { type FanOptions, cardFanLayout } from "../layout/fanLayout";
-import { HandReorderDragIdContext } from "../context/HandReorderDragContext";
 import type { R3FGroupProps } from "../types";
 import type { CardFanProps } from "./CardFan";
 
@@ -27,16 +25,17 @@ export type ReorderableCardFanProps = {
   handZoneId?: string;
   renderCard: (cardId: string) => ReactElement;
   reorderDragThresholdPx?: number;
-  /**
-   * Extra local **Y** on the **dragged** card only while reordering (`ecard`). Neighbors stay on the
-   * row plane. Arc style: also offsets the lifted card. @default 0.1
-   */
   dragLiftY?: number;
   /**
-   * Frame-rate–independent smoothing **λ** for card follow (arc reorder + rotation easing).
-   * **Higher** = snappier. `ecard` reorder uses **instant** positions (no rubber-band). @default 16
+   * Frame-rate–independent smoothing **λ** for card follow toward the fan layout.
+   * **Lower** = slower, smoother; **higher** = snappier. @default 9
    */
   reorderDamping?: number;
+  /**
+   * Smooths the **insert index** (0…n−1) toward the pointer’s discrete slot.
+   * **Lower** = slower, silkier index changes. @default 7.5
+   */
+  previewIndexDamping?: number;
 } & Omit<CardFanProps, "children">;
 
 function moveInOrder<T>(arr: readonly T[], from: number, to: number): T[] {
@@ -53,11 +52,6 @@ type CardWithPointer = { onCardPointerDown?: (e: ThreeEvent<PointerEvent>) => vo
 
 const POS_EPS = 0.0004;
 const ROT_EPS = 0.0003;
-/** Match `fanLayout.ts` defaults — reorder preview row for cards that aren’t being dragged. */
-const FAN_ROW_Y = 0;
-const FAN_ROW_Z = 0.22;
-/** Camera-ward local Z — **dragged card only** (paint order + readable lift vs neighbors). */
-const HAND_DRAGGED_Z_LIFT = 0.12;
 
 function computeSlotScreenX(
   g: Group,
@@ -105,7 +99,7 @@ function targetIndexFromClientX(
 
 /**
  * ecard/arc `CardFan` with **press-drag** to reorder. Wire `onHandOrderChange` to your engine.
- * Pointer sampling runs in the **render** loop; `ecard` uses instant slot + positions (no sticky lag).
+ * Pointer sampling is coalesced to the **render** loop; follow uses **damped** interpolation.
  */
 export function ReorderableCardFan({
   cardIds,
@@ -113,8 +107,9 @@ export function ReorderableCardFan({
   handZoneId,
   renderCard,
   reorderDragThresholdPx = 8,
-  dragLiftY = 0.1,
-  reorderDamping = 16,
+  dragLiftY = 0.12,
+  reorderDamping = 9,
+  previewIndexDamping = 7.5,
   radius,
   arc,
   style = "ecard",
@@ -141,12 +136,13 @@ export function ReorderableCardFan({
 
   /** RAF-sampled — avoid heavy hit-testing on every `pointermove` (can fire 100×/s). */
   const pointerClientXRef = useRef(0);
+  /** Smoothed 0…n−1 “insert index” while dragging, damped toward the discrete target each frame. */
+  const previewToFloatRef = useRef(0);
   const transformLambdaRef = useRef(reorderDamping);
+  const previewIndexLambdaRef = useRef(previewIndexDamping);
   const dragLiftYRef = useRef(dragLiftY);
   const cardWrapRefs = useRef(new Map<string, Group>());
   const hasSnapped = useRef(new Set<string>());
-  /** React state so Card JSX can apply paint order every commit (react-spring resets imperative tweaks). */
-  const [handDragCardId, setHandDragCardId] = useState<string | null>(null);
   const posTarget = useRef(new Vector3());
   const cardIdsRef = useRef(cardIds);
   const layoutOptsRef = useRef<Parameters<typeof cardFanLayout>[1] & FanOptions>(
@@ -178,6 +174,7 @@ export function ReorderableCardFan({
   layoutOptsRef.current = layoutOpts;
   dragLiftYRef.current = dragLiftY;
   transformLambdaRef.current = reorderDamping;
+  previewIndexLambdaRef.current = previewIndexDamping;
   cameraRef.current = camera;
   sizeWidthRef.current = size.width;
   nRef.current = n;
@@ -201,6 +198,7 @@ export function ReorderableCardFan({
     const layout = layoutOptsRef.current;
     const dLift = dragLiftYRef.current;
     const transformL = transformLambdaRef.current;
+    const previewL = previewIndexLambdaRef.current;
 
     const dt = Math.max(delta, 1e-4, 1 / 1000);
     const cardSet = new Set(ids);
@@ -211,8 +209,6 @@ export function ReorderableCardFan({
     }
 
     const n0 = ids.length;
-    /** Insert index under pointer — **not** smoothed (avoids sluggish “magnetic” slot lag). */
-    let previewInsertIndex = -1;
     if (d?.armed && n0 > 0) {
       const root = rootRef.current;
       if (root) {
@@ -223,20 +219,30 @@ export function ReorderableCardFan({
           cameraRef.current,
           sizeWidthRef.current
         );
-        previewInsertIndex = targetIndexFromClientX(
+        const rawTo = targetIndexFromClientX(
           n0,
           xs,
           pointerClientXRef.current
         );
-      } else {
-        previewInsertIndex = d.from;
+        previewToFloatRef.current = MathUtils.damp(
+          previewToFloatRef.current,
+          rawTo,
+          previewL,
+          dt
+        );
       }
     }
 
-    const previewToDiscretized =
-      previewInsertIndex >= 0
-        ? MathUtils.clamp(previewInsertIndex, 0, n0 - 1)
-        : -1;
+    const previewToDiscretized = (() => {
+      if (d?.armed && n0 > 0) {
+        return MathUtils.clamp(
+          Math.round(previewToFloatRef.current),
+          0,
+          n0 - 1
+        );
+      }
+      return -1;
+    })();
 
     let needFrame = false;
     for (const id of ids) {
@@ -257,36 +263,17 @@ export function ReorderableCardFan({
       }
       const { position, rotation } = cardFanLayout(slot, layout);
       const lift = d?.armed && d.startId === id;
-      const opts = layout as FanOptions;
-      const fanStyle = opts.style ?? "ecard";
+      posTarget.current.set(
+        position[0]!,
+        position[1]! + (lift ? dLift : 0),
+        position[2]!
+      );
+      const tx = rotation[0]!;
+      const ty = rotation[1]!;
+      const tz = rotation[2]!;
 
-      if (!d?.armed) {
-        posTarget.current.set(position[0]!, position[1]!, position[2]!);
-      } else if (fanStyle === "ecard") {
-        const yRow = opts.y ?? FAN_ROW_Y;
-        const zRow = opts.zHand ?? FAN_ROW_Z;
-        if (lift) {
-          /** Dragged card only: toward camera + slight Y vs flat neighbor row. */
-          posTarget.current.set(
-            position[0]!,
-            yRow + dLift,
-            zRow + HAND_DRAGGED_Z_LIFT
-          );
-        } else {
-          posTarget.current.set(position[0]!, yRow, zRow);
-        }
-      } else {
-        posTarget.current.set(
-          position[0]!,
-          position[1]! + (lift ? dLift : 0),
-          position[2]! + (lift ? HAND_DRAGGED_Z_LIFT : 0)
-        );
-      }
-      /** During reorder: neighbors parallel to row; dragged card follows slot tilt from layout. */
-      const reorderNeighborFlat = Boolean(d?.armed && !lift);
-      const tx = reorderNeighborFlat ? 0 : rotation[0]!;
-      const ty = reorderNeighborFlat ? 0 : rotation[1]!;
-      const tz = reorderNeighborFlat ? 0 : rotation[2]!;
+      const isLifted = Boolean(d?.armed && d.startId === id);
+      g.renderOrder = isLifted ? 20 : 0;
 
       if (!hasSnapped.current.has(id)) {
         g.position.copy(posTarget.current);
@@ -295,44 +282,35 @@ export function ReorderableCardFan({
         needFrame = true;
         continue;
       }
-
-      const ecardReorder = Boolean(d?.armed && fanStyle === "ecard");
-      if (ecardReorder) {
-        /** No positional damping — stops rubber-band “stick” toward slot centers. */
-        g.position.copy(posTarget.current);
-      } else {
-        g.position.x = MathUtils.damp(
-          g.position.x,
-          posTarget.current.x,
-          transformL,
-          dt
-        );
-        g.position.y = MathUtils.damp(
-          g.position.y,
-          posTarget.current.y,
-          transformL,
-          dt
-        );
-        g.position.z = MathUtils.damp(
-          g.position.z,
-          posTarget.current.z,
-          transformL,
-          dt
-        );
-      }
+      g.position.x = MathUtils.damp(
+        g.position.x,
+        posTarget.current.x,
+        transformL,
+        dt
+      );
+      g.position.y = MathUtils.damp(
+        g.position.y,
+        posTarget.current.y,
+        transformL,
+        dt
+      );
+      g.position.z = MathUtils.damp(
+        g.position.z,
+        posTarget.current.z,
+        transformL,
+        dt
+      );
       g.rotation.x = MathUtils.damp(g.rotation.x, tx, transformL, dt);
       g.rotation.y = MathUtils.damp(g.rotation.y, ty, transformL, dt);
       g.rotation.z = MathUtils.damp(g.rotation.z, tz, transformL, dt);
 
-      const dist2 = ecardReorder ? 0 : g.position.distanceToSquared(posTarget.current);
+      const dist2 = g.position.distanceToSquared(posTarget.current);
       const rotErr =
         Math.abs(g.rotation.x - tx) +
         Math.abs(g.rotation.y - ty) +
         Math.abs(g.rotation.z - tz);
       if (dist2 < POS_EPS * POS_EPS && rotErr < ROT_EPS * 3) {
-        if (!ecardReorder) {
-          g.position.copy(posTarget.current);
-        }
+        g.position.copy(posTarget.current);
         g.rotation.set(tx, ty, tz);
       } else if (dist2 > POS_EPS * POS_EPS || rotErr > ROT_EPS) {
         needFrame = true;
@@ -363,6 +341,7 @@ export function ReorderableCardFan({
       }
       const { clientX, clientY, pointerId } = e.nativeEvent;
       pointerClientXRef.current = clientX;
+      previewToFloatRef.current = from;
       const d0: NonNullable<typeof drag.current> = {
         from,
         startId: cardId,
@@ -394,7 +373,7 @@ export function ReorderableCardFan({
             return;
           }
           d.armed = true;
-          setHandDragCardId(d.startId);
+          previewToFloatRef.current = d.from;
         }
         pointerClientXRef.current = ev.clientX;
       };
@@ -403,7 +382,6 @@ export function ReorderableCardFan({
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", finish);
         window.removeEventListener("pointercancel", finish);
-        setHandDragCardId(null);
         const d = drag.current;
         const capId = d?.pointerId;
         if (d) {
@@ -476,10 +454,8 @@ export function ReorderableCardFan({
   });
 
   return (
-    <HandReorderDragIdContext.Provider value={handDragCardId}>
-      <group ref={rootRef as React.Ref<Group>} {...(groupProps as R3FGroupProps)}>
-        {faceTiltX === 0 ? perCard : <group rotation-x={faceTiltX}>{perCard}</group>}
-      </group>
-    </HandReorderDragIdContext.Provider>
+    <group ref={rootRef as React.Ref<Group>} {...(groupProps as R3FGroupProps)}>
+      {faceTiltX === 0 ? perCard : <group rotation-x={faceTiltX}>{perCard}</group>}
+    </group>
   );
 }

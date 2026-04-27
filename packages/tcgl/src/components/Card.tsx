@@ -18,12 +18,7 @@ import {
   type Texture,
 } from "three";
 import { useTCGL, useTCGLEvents } from "../context/TCGLContext";
-import {
-  HAND_REORDER_MESH_DRAGGED_ON_TOP,
-  HAND_REORDER_MESH_UNDER,
-} from "../constants/handReorderPaint";
 import { DEFAULT_CARD_H, DEFAULT_CARD_W } from "../constants/dimensions";
-import { useHandReorderDragPaint } from "../context/HandReorderDragContext";
 import { createRoundedCardAlphaMap } from "../utils/roundedCardAlphaMap";
 import { getCardRimWorldRadius } from "../utils/cardRimParams";
 import { CardEdgeRim } from "./CardEdgeRim";
@@ -117,8 +112,6 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 ) {
   const { shadows: shadowsOn } = useTCGL();
   const events = useTCGLEvents();
-  const { isDragged: isHandReorderDragged, isFanDragging } =
-    useHandReorderDragPaint(id);
   const allowShadow = shadowsOn && !screenOverlay;
   const [hovered, setHovered] = useState(false);
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
@@ -185,49 +178,10 @@ export const Card = forwardRef<Group, CardProps>(function Card(
   const showRim =
     (hovered || selected || highlighted) && !disabled && !screenOverlay;
 
-  const rimHandReorderRole =
-    showRim && isHandReorderDragged
-      ? ("dragged" as const)
-      : showRim && isFanDragging && !isHandReorderDragged
-        ? ("neighbor" as const)
-        : undefined;
-
-  /** Face planes during fan reorder — JSX props survive react-spring commits every frame. */
-  const faceRoBase = isHandReorderDragged
-    ? HAND_REORDER_MESH_DRAGGED_ON_TOP
-    : isFanDragging && !isHandReorderDragged
-      ? HAND_REORDER_MESH_UNDER
-      : undefined;
-  const frontMeshRenderOrder =
-    faceRoBase !== undefined ? faceRoBase + 1 : 2;
-  const backMeshRenderOrder =
-    faceRoBase !== undefined ? faceRoBase : 1;
-
-  const reorderDragDepthProps = isHandReorderDragged
-    ? ({ depthTest: false, depthWrite: false } as const)
-    : {};
-
-  const animatedLiftGroupRenderOrder = isHandReorderDragged
-    ? HAND_REORDER_MESH_DRAGGED_ON_TOP
-    : isFanDragging && !isHandReorderDragged
-      ? HAND_REORDER_MESH_UNDER
-      : hovered && !disabled
-        ? 6
-        : selected && !disabled
-          ? 5
-          : 0;
-
-  /** Hand reorder: suppress Card hover lift / pointer tilt — fan wrappers supply motion (dragged card only). */
-  const flatHandReorder = isFanDragging;
-
   const { lift, rotX, rotY, rotZ, cardOpacity, rimAlpha } = useSpring({
-    lift:
-      tableClearance +
-      (hovered && !disabled && !flatHandReorder ? hoverLift : 0),
-    rotX:
-      disabled || !pointerTilt || flatHandReorder ? 0 : tilt.x * maxTilt,
-    rotY:
-      disabled || !pointerTilt || flatHandReorder ? 0 : tilt.y * maxTilt,
+    lift: tableClearance + (hovered && !disabled ? hoverLift : 0),
+    rotX: disabled || !pointerTilt ? 0 : tilt.x * maxTilt,
+    rotY: disabled || !pointerTilt ? 0 : tilt.y * maxTilt,
     rotZ: disabled ? 0 : tapRz,
     cardOpacity: disabled ? 0.42 : 1,
     rimAlpha: showRim ? rimStrength : 0,
@@ -377,7 +331,12 @@ export const Card = forwardRef<Group, CardProps>(function Card(
       {...groupProps}
       ref={ref}
     >
-      <AnimatedGroup position-y={lift} renderOrder={animatedLiftGroupRenderOrder}>
+      <AnimatedGroup
+        position-y={lift}
+        renderOrder={
+          hovered && !disabled ? 6 : selected && !disabled ? 5 : 0
+        }
+      >
         <group ref={flipArcRef}>
           <group
             rotation={
@@ -405,7 +364,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                   receiveShadow={false}
                   frustumCulled={false}
                   position={[0, 0, 0.0002]}
-                  renderOrder={frontMeshRenderOrder}
+                  renderOrder={2}
                 >
                   <planeGeometry args={[DEFAULT_CARD_W, DEFAULT_CARD_H]} />
                   {screenOverlay ? (
@@ -417,8 +376,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                       side={FrontSide}
                       alphaMap={alphaMap ?? undefined}
                       alphaTest={alphaMap ? 0.12 : 0}
-                      depthWrite={!isHandReorderDragged}
-                      depthTest={!isHandReorderDragged}
+                      depthWrite
                       polygonOffset
                       polygonOffsetFactor={-1}
                       polygonOffsetUnits={-1}
@@ -429,7 +387,6 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                       map={mapFront}
                       opacity={cardOpacity}
                       {...commonMat}
-                      {...reorderDragDepthProps}
                     />
                   )}
                   {showRim && (
@@ -443,7 +400,6 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                       cornerRadiusWorld={rimWorld}
                       alphaMap={alphaMap}
                       alphaSpring={rimAlpha}
-                      handReorderRole={rimHandReorderRole}
                     />
                   )}
                 </mesh>
@@ -452,7 +408,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                   receiveShadow={false}
                   frustumCulled={false}
                   position={[0, 0, -0.0002]}
-                  renderOrder={backMeshRenderOrder}
+                  renderOrder={1}
                 >
                   <planeGeometry args={[DEFAULT_CARD_W, DEFAULT_CARD_H]} />
                   {screenOverlay ? (
@@ -462,8 +418,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                       opacity={cardOpacity}
                       transparent
                       side={BackSide}
-                      depthWrite={!isHandReorderDragged}
-                      depthTest={!isHandReorderDragged}
+                      depthWrite
                       alphaMap={alphaMap ?? undefined}
                       alphaTest={alphaMap ? 0.12 : 0}
                       polygonOffset
@@ -476,7 +431,6 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                       map={mapBack}
                       opacity={cardOpacity}
                       {...commonMat}
-                      {...reorderDragDepthProps}
                       side={BackSide}
                     />
                   )}
@@ -491,7 +445,6 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                       cornerRadiusWorld={rimWorld}
                       alphaMap={alphaMap}
                       alphaSpring={rimAlpha}
-                      handReorderRole={rimHandReorderRole}
                     />
                   )}
                 </mesh>
