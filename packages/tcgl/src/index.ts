@@ -6,6 +6,11 @@ export { TCGLProvider, useTCGL, useTCGLEvents } from "./context/TCGLContext";
 export { TCGLCanvas, type TCGLCanvasProps } from "./components/TCGLCanvas";
 export { Playmat, type PlaymatProps } from "./components/Playmat";
 export { Card, type CardProps } from "./components/Card";
+export {
+  CardVfx,
+  type CardVfxProps,
+  TABLE_CARD_FACE_ALIGN,
+} from "./components/CardVfx";
 export { CardBack, type CardBackProps } from "./components/CardBack";
 export { CardFan, type CardFanProps } from "./components/CardFan";
 export { CardStack, type CardStackProps } from "./components/CardStack";
@@ -36,3 +41,9 @@ export {
 } from "./components/interaction/SelectionOutline";
 export { cardFanLayout, type FanOptions, type FanStyle } from "./layout/fanLayout";
 export { cardStackIndex, cardPileIndex, cardGridIndex } from "./layout/stackLayout";
+export {
+  cardVfxPresets,
+  cardVfxLifeAlpha,
+  seedCardVfxBurst,
+  type CardVfxKind,
+} from "./vfx/cardVfxPresets";

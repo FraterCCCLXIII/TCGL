@@ -11,12 +11,22 @@ body,
   background: #5a5a62;
 }
 
+/**
+ * Shell stays `pointer-events: none` so the rest of the viewport still hits the canvas; the inner
+ * `.hud-scroll` uses `auto` + `overflow: auto` so wheel/trackpad can scroll the panel (wheels
+ * do not scroll an element with `pointer-events: none`).
+ */
 .hud {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
-  max-height: 32%;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.hud-scroll {
+  max-height: 32vh;
   overflow: auto;
   padding: 0.5rem 0.75rem;
   font: 12px/1.4 ui-monospace, monospace;
@@ -25,10 +35,10 @@ body,
     transparent,
     rgba(210, 210, 216, 0.92)
   );
-  pointer-events: none;
+  pointer-events: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
-/* Let controls in the HUD receive clicks (parent uses none so the 3D canvas keeps pointer events). */
 .hud label,
 .hud input,
 .hud button,

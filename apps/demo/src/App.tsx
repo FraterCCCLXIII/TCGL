@@ -14,9 +14,11 @@ import {
   BattlefieldZone,
   CameraRig,
   Card,
+  type CardVfxKind,
   CardFan,
   CardPile,
   CardStack,
+  CardVfx,
   DeckZone,
   DropZoneOverlay,
   GraveyardZone,
@@ -105,6 +107,16 @@ export function App() {
   const [tiltPitchDeg, setTiltPitchDeg] = useState(0);
   const [tiltYawDeg, setTiltYawDeg] = useState(0);
   const [tiltRollDeg, setTiltRollDeg] = useState(0);
+  const [vfxKind, setVfxKind] = useState<CardVfxKind>("damage");
+  const [vfxTrigger, setVfxTrigger] = useState(0);
+  /**
+   * 2D playmat image under a transparent WebGL view (not a 3D texture). When on with 3D table
+   * off, an invisible 3D floor still receives card shadows.
+   */
+  const [playmatImageBehind, setPlaymatImageBehind] = useState(false);
+  /** When false, hides the 3D table split planes, seam, and playmat contact-shadow (not card shadows). */
+  const [showPlaymatSurface, setShowPlaymatSurface] = useState(true);
+  const use2dPlaymatBackdrop = playmatImageBehind && !showPlaymatSurface;
   const tableTilt = useMemo(
     () =>
       [
@@ -229,6 +241,19 @@ export function App() {
       }
       if (e.key === "Escape" && readMode) {
         setReadExiting(true);
+      }
+      const vmap: CardVfxKind[] = [
+        "damage",
+        "heal",
+        "buff",
+        "debuff",
+        "generic",
+      ];
+      const idx = "12345".indexOf(e.key);
+      if (idx >= 0) {
+        setVfxKind(vmap[idx]!);
+        setVfxTrigger((k) => k + 1);
+        return;
       }
     };
     window.addEventListener("keydown", onKey);
@@ -366,8 +391,23 @@ export function App() {
   );
 
   return (
-    <>
-      <TCGLCanvas events={events} shadows={shadowsOn} style={{ height: "100vh" }}>
+    <div
+      className="demo-viewport"
+      style={
+        use2dPlaymatBackdrop
+          ? {
+              minHeight: "100vh",
+              background: `#5a5a62 url("/arena-playmat.png") center / cover no-repeat`,
+            }
+          : { minHeight: "100vh" }
+      }
+    >
+        <TCGLCanvas
+          events={events}
+          shadows={shadowsOn}
+          style={{ height: "100vh" }}
+          transparentBackground={use2dPlaymatBackdrop}
+        >
         <CameraRig position={cameraPosition} fov={40} />
         <LightingRig />
 
@@ -377,6 +417,8 @@ export function App() {
           tilt={tableTilt}
           splitSides={{ near: "#55555d", far: "#65656d" }}
           showCenterSeam
+          showSurface={showPlaymatSurface}
+          shadowCatcher={use2dPlaymatBackdrop}
         >
           <Suspense fallback={null}>
             <PlayerArea side="near" position={[0, 0, 2.3]}>
@@ -486,18 +528,26 @@ export function App() {
 
             <BattlefieldZone id="battlefield" position={[0, 0, -0.5]}>
               <group ref={battlefieldGroupRef}>
-                <Card
-                  ref={setCardGroupRef("c-bf-1")}
-                  id="c-bf-1"
-                  position={[-0.55, 0, 0]}
-                  face={face(1)}
-                  back={BACK}
-                  cardScale={1.08}
-                  faceUp={isFaceUp("c-bf-1")}
-                  selected={selectedId === "c-bf-1"}
-                  visible={inPlay("c-bf-1")}
-                  onCardDoubleClick={() => toggleFace("c-bf-1")}
-                />
+                <group position={[-0.55, 0, 0]}>
+                  <Card
+                    ref={setCardGroupRef("c-bf-1")}
+                    id="c-bf-1"
+                    position={[0, 0, 0]}
+                    face={face(1)}
+                    back={BACK}
+                    cardScale={1.08}
+                    faceUp={isFaceUp("c-bf-1")}
+                    selected={selectedId === "c-bf-1"}
+                    visible={inPlay("c-bf-1")}
+                    onCardDoubleClick={() => toggleFace("c-bf-1")}
+                  />
+                  <CardVfx
+                    kind={vfxKind}
+                    trigger={vfxTrigger}
+                    scale={1.08}
+                    faceAlign
+                  />
+                </group>
                 <Card
                   ref={setCardGroupRef(DRAG_CARD_ID)}
                   id={DRAG_CARD_ID}
@@ -571,9 +621,50 @@ export function App() {
             />
           </Suspense>
         </Playmat>
-      </TCGLCanvas>
+        </TCGLCanvas>
 
       <div className="hud">
+        <div className="hud-scroll">
+        <p
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+            gap: 8,
+            maxWidth: 420,
+            opacity: 0.95,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>View</span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={playmatImageBehind}
+              onChange={(e) => setPlaymatImageBehind(e.target.checked)}
+            />
+            <span>Playmat art (2D under the view — not a 3D floor texture)</span>
+          </label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={showPlaymatSurface}
+              onChange={(e) => setShowPlaymatSurface(e.target.checked)}
+            />
+            <span>Show 3D table (split + seam + playmat contact shadow)</span>
+          </label>
+          {playmatImageBehind && showPlaymatSurface ? (
+            <span style={{ opacity: 0.8, fontSize: 11 }}>
+              Turn <strong>3D table</strong> off to see the 2D playmat: the table becomes transparent
+              in WebGL, but <strong>shadows</strong> still render on an invisible floor.
+            </span>
+          ) : null}
+          {playmatImageBehind && !showPlaymatSurface ? (
+            <span style={{ opacity: 0.75, fontSize: 11 }}>
+              Image: <code>public/arena-playmat.png</code> → <code>/arena-playmat.png</code> (gray
+              #5a5a62 if missing)
+            </span>
+          ) : null}
+        </p>
         <p>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
             <input
@@ -581,7 +672,7 @@ export function App() {
               checked={shadowsOn}
               onChange={(e) => setShadowsOn(e.target.checked)}
             />
-            <span>Shadows</span>
+            <span>Shadows (map + card cast/receive)</span>
           </label>
         </p>
         <p style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 360 }}>
@@ -663,9 +754,47 @@ export function App() {
           <strong>TCGL v0</strong> — presentation + interaction. Hover, tilt, click/double-click,
           drag on the battlefield sample, <kbd>F</kbd> flips the selected card.
         </p>
+        <p
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            maxWidth: 420,
+            alignItems: "flex-start",
+          }}
+        >
+          <span style={{ opacity: 0.85 }}>
+            Card VFX (left battlefield creature): same preset and trigger row — 1 damage · 2 heal · 3
+            buff · 4 debuff · 5 generic
+          </span>
+          <span style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+            {(
+              [
+                ["damage", "Damage", "#f97316"] as const,
+                ["heal", "Heal", "#4ade80"] as const,
+                ["buff", "Buff", "#f5d15c"] as const,
+                ["debuff", "Debuff", "#c084fc"] as const,
+                ["generic", "Generic", "#e2e8f0"] as const,
+              ] as const
+            ).map(([k, label, c]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => {
+                  setVfxKind(k);
+                  setVfxTrigger((n) => n + 1);
+                }}
+                style={{ borderColor: c }}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
+        </p>
         <p>
           <kbd>H</kbd> outline · <kbd>T</kbd> tap · <kbd>D</kbd> drop overlay · <kbd>F</kbd> flip
-          selected · <kbd>S</kbd> read · <kbd>Esc</kbd> exit read · double-click to flip
+          selected · <kbd>1</kbd>–<kbd>5</kbd> card VFX · <kbd>S</kbd> read · <kbd>Esc</kbd> exit
+          read · double-click to flip
         </p>
         <p style={{ opacity: 0.85 }}>
           <kbd>S</kbd> / <kbd>Esc</kbd> — with a card selected, <kbd>S</kbd> moves that 3D card in world
@@ -681,7 +810,8 @@ export function App() {
             </p>
           ))
         )}
+        </div>
       </div>
-    </>
+    </div>
   );
 }

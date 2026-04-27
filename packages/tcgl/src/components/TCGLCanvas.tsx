@@ -1,6 +1,6 @@
 import { Canvas, useThree, type CanvasProps } from "@react-three/fiber";
 import { type ReactNode, useLayoutEffect, useMemo } from "react";
-import { PCFSoftShadowMap } from "three";
+import { Color, PCFSoftShadowMap } from "three";
 import { TCGLProvider } from "../context/TCGLContext";
 import { noopCardEvents, type CardInteractionEvents, type TCGLContextValue } from "../types";
 
@@ -9,8 +9,14 @@ export type TCGLCanvasProps = Omit<CanvasProps, "children" | "events" | "shadows
   /** Card interaction sink — not R3F's Canvas `events` (event manager). */
   events?: Partial<CardInteractionEvents>;
   cardWidth?: number;
-  /** Scene clear color (R3F `<color>` background). @default #5a5a62 */
+  /** Scene clear color when `transparentBackground` is false. @default #5a5a62 */
   backgroundColor?: string;
+  /**
+   * When true, clears the WebGL color buffer with alpha 0 and leaves `scene.background` null
+   * so a DOM element behind the canvas (e.g. a 2D playmat image) is visible. 3D content and
+   * shadow mapping behave normally. @default false
+   */
+  transparentBackground?: boolean;
   /**
    * Enable shadow maps (Canvas), key directional `castShadow`, and context for `Card` / `Playmat`.
    * @default true
@@ -43,6 +49,31 @@ function GlShadowMapSync({ enabled }: { enabled: boolean }) {
 }
 
 /**
+ * Solid scene background, or full transparency so a HTML layer under the canvas can show through.
+ */
+function SceneBackgroundSync({
+  transparent,
+  backgroundColor,
+}: {
+  transparent: boolean;
+  backgroundColor: string;
+}) {
+  const scene = useThree((s) => s.scene);
+  const gl = useThree((s) => s.gl);
+  useLayoutEffect(() => {
+    if (transparent) {
+      scene.background = null;
+      gl.setClearColor(0x000000, 0);
+    } else {
+      const c = new Color(backgroundColor);
+      scene.background = c;
+      gl.setClearColor(c, 1);
+    }
+  }, [backgroundColor, gl, scene, transparent]);
+  return null;
+}
+
+/**
  * R3F canvas + TCGL event context. Your game stays outside; this is presentation.
  */
 export function TCGLCanvas({
@@ -50,9 +81,10 @@ export function TCGLCanvas({
   events,
   cardWidth,
   backgroundColor = "#5a5a62",
+  transparentBackground = false,
   style,
   dpr = [1, 2] as [number, number],
-  gl = { antialias: true, alpha: true },
+  gl: glProp,
   shadows: shadowsEnabled = true,
   ...canvasProps
 }: TCGLCanvasProps) {
@@ -62,9 +94,29 @@ export function TCGLCanvas({
       () => ({ events: ev, cardWidth, shadows: shadowsEnabled }),
       [ev, cardWidth, shadowsEnabled]
     );
+  const gl = useMemo(() => {
+    if (typeof glProp === "function") {
+      return glProp;
+    }
+    return {
+      antialias: true,
+      alpha: true,
+      // Better compositing of transparent canvas over HTML when using a 2D backdrop.
+      premultipliedAlpha: transparentBackground ? false : true,
+      ...(typeof glProp === "object" && glProp !== null && !Array.isArray(glProp) ? glProp : {}),
+    };
+  }, [glProp, transparentBackground]);
 
   return (
-    <div style={{ width: "100%", height: "100%", touchAction: "none", ...style }}>
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        touchAction: "none",
+        background: transparentBackground ? "transparent" : undefined,
+        ...style,
+      }}
+    >
       <Canvas
         dpr={dpr}
         gl={gl}
@@ -73,7 +125,10 @@ export function TCGLCanvas({
         shadows={shadowsEnabled}
       >
         <GlShadowMapSync enabled={shadowsEnabled} />
-        <color attach="background" args={[backgroundColor]} />
+        <SceneBackgroundSync
+          transparent={transparentBackground}
+          backgroundColor={backgroundColor}
+        />
         <ambientLight intensity={0.55} />
         <directionalLight
           castShadow={shadowsEnabled}
