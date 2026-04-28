@@ -14,7 +14,6 @@ import {
   BackSide,
   FrontSide,
   Group,
-  MeshBasicMaterial,
   MeshStandardMaterial,
   SRGBColorSpace,
   type Texture,
@@ -23,6 +22,10 @@ import { useTCGL, useTCGLEvents } from "../context/TCGLContext";
 import { DEFAULT_CARD_H, DEFAULT_CARD_W } from "../constants/dimensions";
 import { createRoundedCardAlphaMap } from "../utils/roundedCardAlphaMap";
 import { createRoundedCardEdgeGeometry } from "../utils/roundedCardEdgeGeometry";
+import {
+  createCardFaceShadowDepthMaterial,
+  TCGL_SHADOW_FADE_UNIFORM,
+} from "../materials/cardFaceShadowDepthMaterial";
 import { getCardRimWorldRadius } from "../utils/cardRimParams";
 import { CardEdgeRim } from "./CardEdgeRim";
 import type { CardView, R3FGroupProps, Vec3 } from "../types";
@@ -30,7 +33,6 @@ import type { CardView, R3FGroupProps, Vec3 } from "../types";
 const AnimatedGroup = a.group;
 const FlipRig = a.group;
 const Mat = a.meshStandardMaterial;
-const MatBasic = a.meshBasicMaterial;
 
 const defaultPosition: Vec3 = [0, 0, 0];
 const defaultRotation: Vec3 = [0, 0, 0];
@@ -68,7 +70,8 @@ export type CardProps = CardView & {
   pointerTilt?: boolean;
   /**
    * When true, the card is a vertical plane in local XY (normal +Z) for use inside a `Billboard` or
-   * HUD: no “lay flat on the table” −90° X, unlit albedo, no SDF rim. Table cards omit this.
+   * HUD: no “lay flat on the table” −90° X. Uses the same lit materials and rim behavior as table
+   * cards so viewport hands match scene lighting.
    */
   screenOverlay?: boolean;
   /**
@@ -127,7 +130,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 ) {
   const { shadows: shadowsOn } = useTCGL();
   const events = useTCGLEvents();
-  const allowShadow = shadowsOn && !screenOverlay;
+  const allowShadow = shadowsOn;
   const [hovered, setHovered] = useState(false);
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
   const prevFaceUp = useRef(faceUp);
@@ -159,16 +162,26 @@ export const Card = forwardRef<Group, CardProps>(function Card(
     };
   }, [alphaMap]);
 
-  const edgeMat = useMemo(() => {
-    if (screenOverlay) {
-      return new MeshBasicMaterial({ color: "#333333" });
-    }
-    return new MeshStandardMaterial({
-      color: "#252525",
-      roughness: 0.75,
-      metalness: 0.05,
-    });
-  }, [screenOverlay]);
+  const cardShadowDepthMat = useMemo(
+    () => createCardFaceShadowDepthMaterial(alphaMap, alphaMap ? 0.12 : 0),
+    [alphaMap]
+  );
+
+  useLayoutEffect(() => {
+    return () => {
+      cardShadowDepthMat.dispose();
+    };
+  }, [cardShadowDepthMat]);
+
+  const edgeMat = useMemo(
+    () =>
+      new MeshStandardMaterial({
+        color: "#252525",
+        roughness: 0.75,
+        metalness: 0.05,
+      }),
+    []
+  );
 
   useLayoutEffect(() => {
     return () => {
@@ -228,8 +241,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
     selected,
   ]);
 
-  const showRim =
-    (hovered || selected || highlighted) && !disabled && !screenOverlay;
+  const showRim = (hovered || selected || highlighted) && !disabled;
 
   const { lift, rotX, rotY, rotZ, cardOpacity, rimAlpha } = useSpring({
     lift: tableClearance + (hovered && !disabled ? hoverLift : 0),
@@ -250,14 +262,28 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 
   const flipArcRef = useRef<Group>(null);
   const maxFlipLift = flipArcLiftMax * cardScale;
+  /** 0 = HUD (no shadow), 1 = table — damped each frame so shadow depth fades smoothly. */
+  const shadowFadeRef = useRef(screenOverlay ? 0 : 1);
 
-  useFrame(() => {
+  useFrame((_, dt) => {
     const g = flipArcRef.current;
-    if (!g) {
-      return;
+    if (g) {
+      const t = maxFlipLift * Math.abs(Math.sin(flipR.get()));
+      g.position.set(0, t, 0);
     }
-    const t = maxFlipLift * Math.abs(Math.sin(flipR.get()));
-    g.position.set(0, t, 0);
+    const target = screenOverlay ? 0 : 1;
+    const cur = shadowFadeRef.current;
+    const lambda = 12;
+    const a = 1 - Math.exp(-lambda * Math.min(dt, 0.05));
+    shadowFadeRef.current = cur + (target - cur) * a;
+    if (shadowsOn) {
+      const u = cardShadowDepthMat.userData[TCGL_SHADOW_FADE_UNIFORM] as
+        | { value: number }
+        | undefined;
+      if (u) {
+        u.value = shadowFadeRef.current;
+      }
+    }
   });
 
   useLayoutEffect(() => {
@@ -417,33 +443,18 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                   userData={{ tcglCardFace: "front" as const }}
                   castShadow={allowShadow}
                   receiveShadow={false}
+                  customDepthMaterial={cardShadowDepthMat}
                   frustumCulled={false}
                   position={[0, 0, halfDepth]}
                   renderOrder={2}
                 >
                   <planeGeometry args={[DEFAULT_CARD_W, DEFAULT_CARD_H]} />
-                  {screenOverlay ? (
-                    <MatBasic
-                      color="#ffffff"
-                      map={mapFront}
-                      opacity={cardOpacity}
-                      transparent
-                      side={FrontSide}
-                      alphaMap={alphaMap ?? undefined}
-                      alphaTest={alphaMap ? 0.12 : 0}
-                      depthWrite
-                      polygonOffset
-                      polygonOffsetFactor={-1}
-                      polygonOffsetUnits={-1}
-                    />
-                  ) : (
-                    <Mat
-                      color="#f5f5f5"
-                      map={mapFront}
-                      opacity={cardOpacity}
-                      {...commonMat}
-                    />
-                  )}
+                  <Mat
+                    color="#f5f5f5"
+                    map={mapFront}
+                    opacity={cardOpacity}
+                    {...commonMat}
+                  />
                   {showRim && (
                     <CardEdgeRim
                       face="front"
@@ -462,34 +473,19 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                   userData={{ tcglCardFace: "back" as const }}
                   castShadow={allowShadow}
                   receiveShadow={false}
+                  customDepthMaterial={cardShadowDepthMat}
                   frustumCulled={false}
                   position={[0, 0, -halfDepth]}
                   renderOrder={1}
                 >
                   <planeGeometry args={[DEFAULT_CARD_W, DEFAULT_CARD_H]} />
-                  {screenOverlay ? (
-                    <MatBasic
-                      color="#ffffff"
-                      map={mapBack}
-                      opacity={cardOpacity}
-                      transparent
-                      side={BackSide}
-                      depthWrite
-                      alphaMap={alphaMap ?? undefined}
-                      alphaTest={alphaMap ? 0.12 : 0}
-                      polygonOffset
-                      polygonOffsetFactor={-1}
-                      polygonOffsetUnits={-1}
-                    />
-                  ) : (
-                    <Mat
-                      color="#f5f5f5"
-                      map={mapBack}
-                      opacity={cardOpacity}
-                      {...commonMat}
-                      side={BackSide}
-                    />
-                  )}
+                  <Mat
+                    color="#f5f5f5"
+                    map={mapBack}
+                    opacity={cardOpacity}
+                    {...commonMat}
+                    side={BackSide}
+                  />
                   {showRim && (
                     <CardEdgeRim
                       face="back"

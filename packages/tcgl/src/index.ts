@@ -7,7 +7,12 @@ export {
   applyCardLayFlatGroupTablePitch,
   convertCardFaceMaterialsHudToTable,
   convertCardFaceMaterialsTableToHud,
+  setCardFaceShadowFade,
 } from "./utils/cardPresentationBridge";
+export {
+  createCardFaceShadowDepthMaterial,
+  TCGL_SHADOW_FADE_UNIFORM,
+} from "./materials/cardFaceShadowDepthMaterial";
 export { TCGLProvider, useTCGL, useTCGLEvents } from "./context/TCGLContext";
 export { TCGLCanvas, type TCGLCanvasProps } from "./components/TCGLCanvas";
 export { Playmat, type PlaymatGridConfig, type PlaymatProps } from "./components/Playmat";
