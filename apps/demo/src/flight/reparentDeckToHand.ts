@@ -38,8 +38,8 @@ export type ReparentDeckFlightDeps = {
 
 /**
  * Attach deck root → flight shell (preserve world transform), drive tween, then land in HUD slot.
- * No-op until wired from `beginDeckDraw` / `finishDeckFlight`.
+ * P1 deck→hand uses {@link DeckFlightPilot} + {@link ../App.tsx} `deckFlightShellRef.attach` instead.
  */
 export function attachDeckCardForFlightShell(_deps: ReparentDeckFlightDeps): void {
-  /* TODO(feature/hud-single-card-flight): Object3D.attach + interpolateCardPose + finishDeckFlight order */
+  /* Reserved for optional imperative helpers — animation runs in DeckFlightPilot */
 }

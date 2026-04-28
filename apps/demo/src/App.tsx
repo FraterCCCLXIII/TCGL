@@ -37,6 +37,7 @@ import {
   TCGLCanvas,
   Zone,
 } from "tcgl";
+import { DeckFlightPilot } from "./flight/DeckFlightPilot";
 import { TablePlaneDrag } from "./TablePlaneDrag";
 import {
   advanceStepAction,
@@ -432,6 +433,8 @@ export function App() {
   const stripDragCardRef = useRef<string | null>(null);
   const zoneFlightRef = useRef<ZoneFlightAnim>(null);
   const deckFlightRef = useRef<DeckFlightAnim>(null);
+  /** P1 deck→hand reparent target — empty `<group>`; flying mesh attaches via `Object3D.attach`. */
+  const deckFlightShellRef = useRef<Group>(null);
   const cardGroupById = useRef(new Map<string, Group>());
   const readCaptureGate = useRef(false);
   const setCardGroupRef = useCallback((id: string) => (node: Group | null) => {
@@ -941,6 +944,10 @@ export function App() {
       }
       const innerDest = viewportHandInnerUniform(cardId, engine.state, playerId);
       const { from: fromW, to: toW } = motionWrapperScaledPair(from, to, innerDest);
+      const shell = deckFlightShellRef.current;
+      if (playerId === "p1" && g && shell && pa) {
+        shell.attach(g);
+      }
       setDeckFlight({
         playerId,
         cardId,
@@ -971,6 +978,10 @@ export function App() {
     const z = deckFlightRef.current;
     if (!z) {
       return;
+    }
+    const shell = deckFlightShellRef.current;
+    if (z.playerId === "p1" && shell && shell.children.length > 0) {
+      shell.remove(shell.children[0]!);
     }
     const deckZone =
       z.playerId === "p1" ? demoZones.deck : demoZones.p2Deck;
@@ -1614,37 +1625,12 @@ export function App() {
                 </CardMotion>
               ) : null}
 
-              {deckFlight?.playerId === "p1" ? (
-                <CardMotion
-                  key={deckFlight.nonce}
-                  active
-                  from={deckFlight.from}
-                  to={deckFlight.to}
-                  {...CARD_MOTION_PRESETS.deckToHand}
-                  flip={flipDealRevealFirst(true)}
-                  onComplete={finishDeckFlight}
-                  renderOrder={43}
-                >
-                  {(m) => (
-                    <DemoCard3dTable
-                      id={deckFlight.cardId}
-                      state={engine.state}
-                      setCardGroupRef={noopSetCardGroupRef}
-                      isFaceUp={isFaceUp}
-                      motionFaceUp={m.faceUp}
-                      selectedId={null}
-                      inPlay={inPlay}
-                      onToggleFace={toggleFace}
-                      oneHighlight={false}
-                      oneTapped={false}
-                      pickDisabled
-                      deckDrawFlight
-                      viewportScreenFlat
-                      viewportFlatScale={VIEWPORT_HAND_SCALE_NEAR}
-                    />
-                  )}
-                </CardMotion>
-              ) : null}
+              <group ref={deckFlightShellRef} renderOrder={43} />
+              <DeckFlightPilot
+                deckFlight={deckFlight}
+                shellRef={deckFlightShellRef}
+                onComplete={finishDeckFlight}
+              />
 
               <DeckZone id="p1-deck" position={[-4.2, 0, 0.2]}>
                 <CardStack yStep={0.025}>
