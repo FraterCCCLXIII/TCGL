@@ -60,6 +60,19 @@ export function getZoneIds(state: GameState, zoneId: string): string[] {
   return [...(state.zoneContents[zoneId] ?? [])];
 }
 
+/** First zone in `state.zoneContents` that lists `cardId`, or `null` if absent. */
+export function findZoneIdForCard(
+  state: GameState,
+  cardId: string
+): string | null {
+  for (const [zid, ids] of Object.entries(state.zoneContents)) {
+    if (ids?.includes(cardId)) {
+      return zid;
+    }
+  }
+  return null;
+}
+
 export function getHandIds(state: GameState): string[] {
   return getZoneIds(state, demoZones.hand);
 }

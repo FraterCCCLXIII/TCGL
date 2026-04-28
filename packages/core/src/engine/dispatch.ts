@@ -26,6 +26,8 @@ export function dispatch(state: GameState, action: GameAction): EngineResult {
       return passPriority(state, action);
     case "CAST_TO_STACK":
       return castToStack(state, action);
+    case "TOGGLE_CARD_TAPPED":
+      return toggleCardTapped(state, action);
   }
   return err(state, {
     code: "ILLEGAL",
@@ -68,6 +70,28 @@ function reorderZoneCards(
       fromIndex: a.fromIndex,
       toIndex: a.toIndex,
     },
+  ]);
+}
+
+function toggleCardTapped(
+  state: GameState,
+  a: Extract<GameAction, { type: "TOGGLE_CARD_TAPPED" }>
+): EngineResult {
+  const s = cloneState(state);
+  const card = s.cards[a.cardId];
+  if (!card) {
+    return err(state, { code: "ILLEGAL", message: "Unknown card" });
+  }
+  if (card.controllerId !== a.playerId) {
+    return err(state, {
+      code: "ILLEGAL",
+      message: "Player does not control this card",
+    });
+  }
+  card.tapped = !card.tapped;
+  s.priorityPassCount = 0;
+  return ok(s, [
+    { type: "CARD_TAP_TOGGLED", cardId: a.cardId, tapped: card.tapped },
   ]);
 }
 

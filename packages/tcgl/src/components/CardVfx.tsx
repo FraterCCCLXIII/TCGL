@@ -1,5 +1,5 @@
 import { useFrame, useThree } from "@react-three/fiber";
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import {
   AdditiveBlending,
   BufferGeometry,
@@ -52,6 +52,12 @@ export function CardVfx({
 }: CardVfxProps) {
   const { clock } = useThree();
   const pointsRef = useRef<Points | null>(null);
+  const assignPointsRef = useCallback((node: Points | null) => {
+    pointsRef.current = node;
+    if (node) {
+      node.raycast = () => {};
+    }
+  }, []);
   const preset = cardVfxPresets[kind];
   const n = preset.particleCount;
   /** Sized by `n` — `useRef` initial value only runs once, so we resize in an effect when `n` changes. */
@@ -161,7 +167,7 @@ export function CardVfx({
   const inner = (
     <group position={surfaceOffset as [number, number, number]}>
       <points
-        ref={pointsRef}
+        ref={assignPointsRef}
         geometry={geometry}
         frustumCulled={false}
         renderOrder={10}

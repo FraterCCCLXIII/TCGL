@@ -15,9 +15,14 @@ export function CameraAttachedHandsRoot({ children }: { children: ReactNode }) {
     if (!shell) {
       return;
     }
-    camera.add(shell);
+    /** Bridge duplicate `@types/three` installs (fiber vs demo) without weakening runtime types. */
+    const cam = camera as unknown as {
+      add: (o: Group) => void;
+      remove: (o: Group) => void;
+    };
+    cam.add(shell);
     return () => {
-      camera.remove(shell);
+      cam.remove(shell);
     };
   }, [camera]);
 

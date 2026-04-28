@@ -13,15 +13,15 @@ export type LightingRigProps = {
  */
 export function LightingRig({
   children,
-  fillIntensity = 0.25,
+  fillIntensity = 0.42,
   rimPosition = [-4, 3, 2],
   ...rest
 }: LightingRigProps) {
   const pos = useMemo(() => rimPosition, [rimPosition]);
   return (
     <group {...rest}>
-      <pointLight position={[-2, 4, 3]} intensity={fillIntensity} color="#d0d0d6" />
-      <pointLight position={pos} intensity={0.2} color="#b8b8c0" />
+      <pointLight position={[-2, 4, 3]} intensity={fillIntensity} color="#e8e8ee" />
+      <pointLight position={pos} intensity={0.34} color="#c8c8d4" />
       {children}
     </group>
   );

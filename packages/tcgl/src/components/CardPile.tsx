@@ -1,4 +1,11 @@
-import { Children, cloneElement, isValidElement, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  forwardRef,
+  isValidElement,
+  type ReactNode,
+} from "react";
+import type { Group } from "three";
 import { cardPileIndex } from "../layout/stackLayout";
 import type { R3FGroupProps } from "../types";
 
@@ -8,10 +15,13 @@ export type CardPileProps = {
 } & R3FGroupProps;
 
 /** Overlapping pile with slight jitter (graveyard / discard feel). */
-export function CardPile({ children, yStep = 0.018, ...groupProps }: CardPileProps) {
+export const CardPile = forwardRef<Group, CardPileProps>(function CardPile(
+  { children, yStep = 0.018, ...groupProps },
+  ref
+) {
   const list = Children.toArray(children);
   return (
-    <group {...groupProps}>
+    <group ref={ref} {...groupProps}>
       {list.map((child, i) => {
         if (!isValidElement(child)) {
           return child;
@@ -29,4 +39,4 @@ export function CardPile({ children, yStep = 0.018, ...groupProps }: CardPilePro
       })}
     </group>
   );
-}
+});

@@ -2,7 +2,12 @@ import type { ReactNode } from "react";
 import { Zone } from "../Zone";
 import type { LayoutKind, R3FGroupProps } from "../../types";
 
-type Common = { id: string; layout?: LayoutKind; children?: ReactNode } & R3FGroupProps;
+type Common = {
+  id: string;
+  layout?: LayoutKind;
+  defaultFaceUp?: boolean;
+  children?: ReactNode;
+} & R3FGroupProps;
 
 export function DeckZone({ id, children, layout = "stack", ...rest }: Common) {
   return (

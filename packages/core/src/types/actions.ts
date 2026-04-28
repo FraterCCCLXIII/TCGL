@@ -11,7 +11,8 @@ export type GameAction =
   | EndTurnAction
   | AdvanceStepAction
   | PassPriorityAction
-  | CastToStackAction;
+  | CastToStackAction
+  | ToggleCardTappedAction;
 
 export type MoveCardAction = {
   type: "MOVE_CARD";
@@ -61,6 +62,14 @@ export type CastToStackAction = {
   playerId: string;
   cardId: string;
   fromZone: string;
+};
+
+/** Flip {@link CardInstance.tapped} (e.g. MTG-style 90° tap / exhausted). */
+export type ToggleCardTappedAction = {
+  type: "TOGGLE_CARD_TAPPED";
+  schemaVersion: SchemaVersion;
+  playerId: string;
+  cardId: string;
 };
 
 export function actionSchemaVersion(

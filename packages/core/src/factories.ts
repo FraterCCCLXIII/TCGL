@@ -60,3 +60,15 @@ export function castToStackAction(
     fromZone,
   };
 }
+
+export function toggleCardTappedAction(
+  playerId: string,
+  cardId: string
+): GameAction {
+  return {
+    type: "TOGGLE_CARD_TAPPED",
+    schemaVersion: SCHEMA_VERSION,
+    playerId,
+    cardId,
+  };
+}

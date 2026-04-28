@@ -76,3 +76,51 @@ export function sampleCardSpatialPoseInAncestor(
     scale: scl.x,
   };
 }
+
+/**
+ * Same world pose as `pose` (expressed local to `expressedIn`), rewritten in `targetAncestor`'s
+ * local frame — for flights that interpolate in the moving player's {@link PlayerArea}.
+ */
+export function reexpressSpatialPoseInAncestor(
+  pose: CardSpatialPose,
+  expressedIn: Group,
+  targetAncestor: Group
+): CardSpatialPose {
+  expressedIn.updateMatrixWorld(true);
+  targetAncestor.updateMatrixWorld(true);
+
+  const pos = new Vector3(
+    pose.position[0],
+    pose.position[1],
+    pose.position[2]
+  );
+  const euler = new Euler(
+    pose.rotation?.[0] ?? 0,
+    pose.rotation?.[1] ?? 0,
+    pose.rotation?.[2] ?? 0,
+    "XYZ"
+  );
+  const quat = new Quaternion().setFromEuler(euler);
+  const u = pose.scale ?? 1;
+  const localMat = new Matrix4().compose(pos, quat, new Vector3(u, u, u));
+
+  const worldMat = new Matrix4().multiplyMatrices(
+    expressedIn.matrixWorld,
+    localMat
+  );
+  const invTarget = new Matrix4().copy(targetAncestor.matrixWorld).invert();
+  const outMat = new Matrix4().multiplyMatrices(invTarget, worldMat);
+
+  const outPos = new Vector3();
+  const outQuat = new Quaternion();
+  const outScl = new Vector3();
+  outMat.decompose(outPos, outQuat, outScl);
+  const outEuler = new Euler().setFromQuaternion(outQuat, "XYZ");
+
+  return {
+    ...pose,
+    position: [outPos.x, outPos.y, outPos.z],
+    rotation: [outEuler.x, outEuler.y, outEuler.z],
+    scale: outScl.x,
+  };
+}

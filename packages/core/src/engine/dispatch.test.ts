@@ -7,6 +7,7 @@ import {
   advanceStepAction,
   passPriorityAction,
   castToStackAction,
+  toggleCardTappedAction,
 } from "../factories";
 import { assertReplayFromActions } from "../replay/replayFromActions";
 
@@ -80,5 +81,26 @@ describe("dispatch", () => {
     ]);
     expect(state.activePlayer).toBe("p2");
     expect(log.entries.length).toBeGreaterThan(0);
+  });
+
+  it("toggles card tapped for controller", () => {
+    const s = twoPlayerWithCard();
+    const r = dispatch(s, toggleCardTappedAction("p1", "c1"));
+    expect(r.error).toBeUndefined();
+    expect(r.state.cards.c1?.tapped).toBe(true);
+    expect(r.events[0]).toEqual({
+      type: "CARD_TAP_TOGGLED",
+      cardId: "c1",
+      tapped: true,
+    });
+    const r2 = dispatch(r.state, toggleCardTappedAction("p1", "c1"));
+    expect(r2.state.cards.c1?.tapped).toBe(false);
+  });
+
+  it("rejects toggle when wrong controller", () => {
+    const s = twoPlayerWithCard();
+    const r = dispatch(s, toggleCardTappedAction("p2", "c1"));
+    expect(r.error?.code).toBe("ILLEGAL");
+    expect(r.state.cards.c1?.tapped).toBe(false);
   });
 });

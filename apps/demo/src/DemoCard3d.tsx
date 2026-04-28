@@ -12,8 +12,8 @@ const BACK = `${BASE}/back.png`;
 export const VIEWPORT_HAND_SCALE_NEAR = 0.62;
 /** Smaller default for the top opponent viewport hand (tune independently of near hand). */
 export const VIEWPORT_HAND_SCALE_OPPONENT = 0.34;
-/** Hover lift on opponent HUD cards — negative matches Card default magnitude but moves toward playmat. */
-export const VIEWPORT_HAND_HOVER_LIFT_OPPONENT = -0.12;
+/** Hover lift on opponent HUD cards — same sign as near hand so lift reads clearly in camera space. */
+export const VIEWPORT_HAND_HOVER_LIFT_OPPONENT = 0.12;
 
 /** Face-down pile — card id still listed in either deck zone (both players). */
 function isCardOnDeckStack(state: GameState, id: string): boolean {
@@ -59,7 +59,8 @@ type DemoCard3dTableProps = {
   inPlay: (id: string) => boolean;
   onToggleFace: (id: string) => void;
   oneHighlight: boolean;
-  oneTapped: boolean;
+  /** Muted “ghost” look; presentation only (see {@link CardProps.ghosted}). */
+  ghosted?: boolean;
   /** Full local `position` on the `Card` (e.g. battlefield); hand/stack omit and stay default. */
   position?: [number, number, number];
   onDragPointer?: {
@@ -82,8 +83,13 @@ type DemoCard3dTableProps = {
    * flip spring instead of inferring from zone/`isFaceUp` alone.
    */
   motionFaceUp?: boolean;
-  /** Opponent hand / concealed pile — always render card backs (TCG-style hidden information). */
+  /** Opponent hand / concealed pile — default card backs until {@link concealedFaceById} has an entry. */
   hideCardFace?: boolean;
+  /**
+   * Same map as the host’s `faceUpById`. When `hideCardFace`, `faceUp` is `concealedFaceById[id] ?? false`
+   * so menu / `toggleFace` can reveal without being overridden by zone defaults.
+   */
+  concealedFaceById?: Record<string, boolean>;
   /**
    * Extra π on outer {@link Card} Y so titles read upright when nested under far `PlayerArea`
    * (`rotation={[0, Math.PI, 0]}`).
@@ -116,7 +122,7 @@ export function DemoCard3dTable({
   inPlay,
   onToggleFace,
   oneHighlight,
-  oneTapped,
+  ghosted = false,
   onDragPointer,
   onCardPointerDown: onCardPointerDownProp,
   onCardDoubleClick: onCardDoubleClickProp,
@@ -124,6 +130,7 @@ export function DemoCard3dTable({
   deckDrawFlight = false,
   motionFaceUp,
   hideCardFace = false,
+  concealedFaceById,
   opponentReadableOrientation = false,
   viewportScreenFlat = false,
   viewportFlatScale,
@@ -138,6 +145,7 @@ export function DemoCard3dTable({
   const isHand4 = id === "c-hand-4";
   const isHand3 = id === "c-hand-3";
   const isDrag = id === DRAG_CARD_ID;
+  const tapped = c?.tapped ?? false;
 
   return (
     <Card
@@ -164,7 +172,7 @@ export function DemoCard3dTable({
       {...(hoverLift !== undefined ? { hoverLift } : {})}
       faceUp={
         hideCardFace
-          ? false
+          ? (concealedFaceById?.[id] ?? false)
           : motionFaceUp !== undefined
             ? motionFaceUp
             : onDeckStack
@@ -173,10 +181,12 @@ export function DemoCard3dTable({
       }
       selected={selectedId === id}
       visible={inPlay(id)}
-      disabled={pickDisabled || onDeckStack || isHand4}
-      opaqueWhenDisabled={pickDisabled}
+      disabled={pickDisabled || isHand4}
+      /** Hand-4 is disabled for tap/drag; dimming comes from `ghosted` so Inactive toggle is visible. */
+      opaqueWhenDisabled={pickDisabled || isHand4}
       highlighted={isHand3 ? oneHighlight : undefined}
-      tapped={isHand3 ? oneTapped : undefined}
+      ghosted={ghosted}
+      tapped={tapped}
       onCardPointerDown={
         onCardPointerDownProp || (isDrag && onDragPointer)
           ? (e: ThreeEvent<PointerEvent>) => {
@@ -203,7 +213,7 @@ type DemoReadProps = {
   isFaceUp: (id: string) => boolean;
   onToggleFace: (id: string) => void;
   oneHighlight: boolean;
-  oneTapped: boolean;
+  ghosted?: boolean;
   onDragForRead?: { onPointerDown: () => void; onPointerUp: () => void };
 };
 
@@ -221,7 +231,7 @@ export function DemoCard3dRead({
   isFaceUp,
   onToggleFace,
   oneHighlight,
-  oneTapped,
+  ghosted = false,
   onDragForRead,
 }: DemoReadProps) {
   const p: [number, number, number] = [0, 0, 0];
@@ -245,7 +255,8 @@ export function DemoCard3dRead({
         cardScale={1.05}
         faceUp={isFaceUp(id)}
         highlighted={oneHighlight}
-        tapped={oneTapped}
+        ghosted={ghosted}
+        tapped={c?.tapped ?? false}
         onCardDoubleClick={() => onToggleFace(id)}
       />
     );
@@ -259,6 +270,9 @@ export function DemoCard3dRead({
         cardScale={1.05}
         faceUp={isFaceUp(id)}
         disabled
+        opaqueWhenDisabled
+        ghosted={ghosted}
+        tapped={c?.tapped ?? false}
         onCardDoubleClick={() => onToggleFace(id)}
       />
     );
@@ -284,6 +298,8 @@ export function DemoCard3dRead({
       face={face(fn)}
       cardScale={cardScaleById(id, state)}
       faceUp={isFaceUp(id)}
+      ghosted={ghosted}
+      tapped={c?.tapped ?? false}
       onCardDoubleClick={() => onToggleFace(id)}
     />
   );

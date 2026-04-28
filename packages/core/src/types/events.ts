@@ -6,6 +6,7 @@ import type { GamePhase, TurnStep } from "./turn";
  */
 export type GameEvent =
   | CardMoved
+  | CardTapToggled
   | ZoneReordered
   | TurnAdvanced
   | StepEntered
@@ -21,6 +22,12 @@ export type CardMoved = {
   fromZone: string;
   toZone: string;
   toIndex: number;
+};
+
+export type CardTapToggled = {
+  type: "CARD_TAP_TOGGLED";
+  cardId: string;
+  tapped: boolean;
 };
 
 export type ZoneReordered = {

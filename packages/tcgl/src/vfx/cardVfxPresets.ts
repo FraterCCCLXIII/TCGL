@@ -3,6 +3,15 @@ import { Color, MathUtils } from "three";
 /** Visual burst kinds for `CardVfx` — not game rules, presentation only. */
 export type CardVfxKind = "damage" | "heal" | "buff" | "debuff" | "generic";
 
+/** Every {@link CardVfxKind} (for menus, cycling, tests). Order is display order. */
+export const CARD_VFX_KINDS: readonly CardVfxKind[] = [
+  "damage",
+  "heal",
+  "buff",
+  "debuff",
+  "generic",
+] as const;
+
 export type CardVfxPreset = {
   particleCount: number;
   /** Seconds until fade-out completes. */

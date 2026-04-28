@@ -6,6 +6,7 @@ import {
   CARD_MOTION_PRESETS,
   easeInOutCubic,
   interpolateCardPose,
+  setCardFlipRigY,
 } from "tcgl";
 
 /** Matches {@link Card} inner pitch when `screenOverlay` is false (lay-flat toward mat). */
@@ -34,6 +35,12 @@ export type AttachedFlightPilotFlight =
       /** Inner mesh pitch bridge — required for correct table ↔ HUD visuals (see {@link Card}). */
       layFlatPitchFrom: number;
       layFlatPitchTo: number;
+      /**
+       * When both set, drives {@link Card} flip rig each frame: `0` = face-up, `Math.PI` = face-down.
+       * Used for opponent HUD (hidden hand) → table reveal and return.
+       */
+      flipRYFrom?: number;
+      flipRYTo?: number;
     }
   | null;
 
@@ -107,6 +114,12 @@ export function AttachedFlightPilot({
       flight.layFlatPitchFrom +
       (flight.layFlatPitchTo - flight.layFlatPitchFrom) * u;
     applyLayFlatPitchBridge(child, innerRx);
+
+    if (flight.flipRYFrom !== undefined && flight.flipRYTo !== undefined) {
+      const ry =
+        flight.flipRYFrom + (flight.flipRYTo - flight.flipRYFrom) * u;
+      setCardFlipRigY(child, ry);
+    }
 
     if (tLin >= 1 - 1e-5 && !completedRef.current) {
       completedRef.current = true;

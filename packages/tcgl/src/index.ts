@@ -1,6 +1,11 @@
 // Mental model: Cards + zones + layouts + interactions — not game rules.
 export * from "./types";
-export { DEFAULT_CARD_H, DEFAULT_CARD_W } from "./constants/dimensions";
+export {
+  DEFAULT_CARD_H,
+  DEFAULT_CARD_TABLE_CLEARANCE_Y,
+  DEFAULT_CARD_W,
+  SCREEN_OVERLAY_GHOST_PICK_Z_NUDGE,
+} from "./constants/dimensions";
 export { createRoundedCardAlphaMap } from "./utils/roundedCardAlphaMap";
 export {
   applyCardLayFlatGroupHudPitch,
@@ -8,7 +13,11 @@ export {
   convertCardFaceMaterialsHudToTable,
   convertCardFaceMaterialsTableToHud,
   resetCardPointerTiltGroup,
+  resetCardTableToHudLayoutOffsets,
   setCardFaceShadowFade,
+  setCardFlipRigY,
+  setCardPointerTiltFromUv,
+  setScreenOverlayCardLiftZ,
 } from "./utils/cardPresentationBridge";
 export {
   createCardFaceShadowDepthMaterial,
@@ -60,6 +69,7 @@ export {
 export { cardFanLayout, type FanOptions, type FanStyle } from "./layout/fanLayout";
 export { cardStackIndex, cardPileIndex, cardGridIndex } from "./layout/stackLayout";
 export {
+  CARD_VFX_KINDS,
   cardVfxPresets,
   cardVfxLifeAlpha,
   seedCardVfxBurst,

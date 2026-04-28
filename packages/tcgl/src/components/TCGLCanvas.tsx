@@ -129,11 +129,11 @@ export function TCGLCanvas({
           transparent={transparentBackground}
           backgroundColor={backgroundColor}
         />
-        <ambientLight intensity={0.55} />
+        <ambientLight intensity={0.78} />
         <directionalLight
           castShadow={shadowsEnabled}
           position={[6, 10, 5]}
-          intensity={0.9}
+          intensity={1.15}
           shadow-bias={-0.0002}
           shadow-normalBias={0.035}
           shadow-mapSize={[2048, 2048]}

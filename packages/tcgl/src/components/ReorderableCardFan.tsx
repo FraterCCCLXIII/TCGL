@@ -54,6 +54,12 @@ export type ReorderableCardFanProps = {
    * **Lower** = slower, silkier index changes. @default 7.5
    */
   previewIndexDamping?: number;
+  /**
+   * Card ids whose fan **wrapper** group snaps to layout every frame (no damping). Use while the
+   * visible mesh is parented under a flight shell: otherwise the wrapper eases toward the slot
+   * empty, then on `attach` the card inherits a second motion (“clunk”) before settling.
+   */
+  layoutHardSnapCardIds?: readonly string[];
 } & Omit<CardFanProps, "children">;
 
 function moveInOrder<T>(arr: readonly T[], from: number, to: number): T[] {
@@ -119,6 +125,10 @@ function mergeReorderOnCardPointerDown(
   const prev = props.onCardPointerDown;
   return cloneElement(node, {
     onCardPointerDown: (e: ThreeEvent<PointerEvent>) => {
+      if (e.nativeEvent.button !== 0) {
+        prev?.(e);
+        return;
+      }
       onReorderPointerDown(e);
       prev?.(e);
     },
@@ -185,6 +195,7 @@ export function ReorderableCardFan({
   dragLiftY = 0.12,
   reorderDamping = 9,
   previewIndexDamping = 7.5,
+  layoutHardSnapCardIds,
   dragTowardTableRatio = 1.35,
   onDragTowardTable,
   radius,
@@ -229,6 +240,8 @@ export function ReorderableCardFan({
   const cameraRef = useRef(camera);
   const sizeWidthRef = useRef(size.width);
   const nRef = useRef(cardIds.length);
+  const hardSnapSetRef = useRef<Set<string>>(new Set());
+  hardSnapSetRef.current = new Set(layoutHardSnapCardIds ?? []);
 
   const n = cardIds.length;
   const layoutOpts = useMemo(
@@ -366,6 +379,14 @@ export function ReorderableCardFan({
       const isLifted = Boolean(d?.armed && d.startId === id);
       g.renderOrder = isLifted ? 20 : 0;
 
+      if (hardSnapSetRef.current.has(id)) {
+        g.position.copy(posTarget.current);
+        g.rotation.set(tx, ty, tz);
+        hasSnapped.current.add(id);
+        needFrame = true;
+        continue;
+      }
+
       if (!hasSnapped.current.has(id)) {
         g.position.copy(posTarget.current);
         g.rotation.set(tx, ty, tz);
@@ -418,8 +439,12 @@ export function ReorderableCardFan({
 
   const onCardPointerDown = useCallback(
     (cardId: string, e: ThreeEvent<PointerEvent>) => {
+      if (e.nativeEvent.button !== 0) {
+        return;
+      }
       e.stopPropagation();
-      if (nRef.current <= 1) {
+      /** With one card there is no reorder, but vertical pull may still start `onDragTowardTable`. */
+      if (nRef.current <= 1 && !onDragTowardTable) {
         return;
       }
       const g = rootRef.current;

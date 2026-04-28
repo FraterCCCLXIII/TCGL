@@ -8,12 +8,14 @@ export {
   type AdvanceStepAction,
   type PassPriorityAction,
   type CastToStackAction,
+  type ToggleCardTappedAction,
   actionSchemaVersion,
   isSupportedAction,
 } from "./types/actions";
 export {
   type GameEvent,
   type CardMoved,
+  type CardTapToggled,
   type ZoneReordered,
   type TurnAdvanced,
   type StepEntered,
@@ -63,6 +65,7 @@ export {
   advanceStepAction,
   passPriorityAction,
   castToStackAction,
+  toggleCardTappedAction,
 } from "./factories";
 
 // --- Wire protocol (shared with server / clients)

@@ -27,11 +27,14 @@ export function useDemoSession() {
     return r;
   }, []);
 
+  /** Same snapshot as {@link dispatch} writes — use in input handlers to avoid stale React `state`. */
+  const getState = useCallback(() => session.current.getState(), []);
+
   const reset = useCallback(() => {
     session.current.reset(seedDemoGame());
     setLastError(null);
     setVersion((n) => n + 1);
   }, []);
 
-  return { state, log, dispatch, lastError, reset };
+  return { state, log, dispatch, getState, lastError, reset };
 }

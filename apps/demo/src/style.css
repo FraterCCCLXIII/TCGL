@@ -208,3 +208,144 @@ body,
 .demo-side-drawer kbd {
   color: #3a3c44;
 }
+
+/* Card context menu (portal): show motion + hover / tap / focus */
+.demo-card-context-menu {
+  pointer-events: auto;
+  font:
+    500 13px/1.35 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-feature-settings: "kern" 1;
+  -webkit-font-smoothing: antialiased;
+  transform-origin: left top;
+  animation: demo-card-context-menu-in 0.18s ease-out;
+}
+
+.demo-card-context-menu[data-flip-up="true"] {
+  transform-origin: left bottom;
+  animation: demo-card-context-menu-in-flip 0.18s ease-out;
+}
+
+.demo-card-context-menu__hint {
+  color: #a8a8b0;
+  font-size: 0.92em;
+  line-height: 1.35;
+  padding: 4px 8px 8px;
+}
+
+.demo-card-context-menu__chevron {
+  opacity: 0.65;
+  font-size: 0.92em;
+}
+
+@keyframes demo-card-context-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes demo-card-context-menu-in-flip {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.demo-card-context-menu__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #eee;
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    transform 0.1s ease;
+}
+
+.demo-card-context-menu__item--row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.demo-card-context-menu__state-pill {
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(238, 238, 238, 0.9);
+}
+
+.demo-card-context-menu__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.demo-card-context-menu__item:hover:not(:disabled) {
+  background: #3d3d48;
+}
+
+.demo-card-context-menu__item:active:not(:disabled) {
+  transform: scale(0.98);
+  background: #4a4a58;
+}
+
+.demo-card-context-menu__item:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.demo-card-context-submenu {
+  pointer-events: auto;
+  animation: demo-card-context-submenu-in 0.15s ease-out;
+}
+
+@keyframes demo-card-context-submenu-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-card-context-menu,
+  .demo-card-context-submenu {
+    animation: none;
+  }
+
+  .demo-card-context-menu__item {
+    transition: none;
+  }
+
+  .demo-card-context-menu__item:active:not(:disabled) {
+    transform: none;
+  }
+}

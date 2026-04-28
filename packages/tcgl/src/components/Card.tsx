@@ -20,7 +20,12 @@ import {
   type Texture,
 } from "three";
 import { useTCGL, useTCGLEvents } from "../context/TCGLContext";
-import { DEFAULT_CARD_H, DEFAULT_CARD_W } from "../constants/dimensions";
+import {
+  DEFAULT_CARD_H,
+  DEFAULT_CARD_TABLE_CLEARANCE_Y,
+  DEFAULT_CARD_W,
+  SCREEN_OVERLAY_GHOST_PICK_Z_NUDGE,
+} from "../constants/dimensions";
 import { createRoundedCardAlphaMap } from "../utils/roundedCardAlphaMap";
 import { createRoundedCardEdgeGeometry } from "../utils/roundedCardEdgeGeometry";
 import {
@@ -103,6 +108,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
   selected = false,
   draggable: _draggable = true,
   tapped = false,
+  ghosted = false,
   highlighted = false,
   disabled = false,
   dragging: _dragging = false,
@@ -114,7 +120,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
   emissiveOnSelect = "#5ee4ff",
   emissiveOnHighlight = "#4ade80",
   /** World units: keep every card above the playmat to avoid z-fighting with a huge mat plane. */
-  tableClearance = 0.06,
+  tableClearance = DEFAULT_CARD_TABLE_CLEARANCE_Y,
   flipArcLiftMax = 0.48,
   cardScale = 1,
   cornerRadius = 0.07,
@@ -271,6 +277,8 @@ export const Card = forwardRef<Group, CardProps>(function Card(
   const showRim = (hovered || selected || highlighted) && !disabled;
 
   const hoverLiftAmount = hovered && !disabled ? hoverLift : 0;
+  const dimmedOpacity =
+    (disabled && !opaqueWhenDisabled) || ghosted ? 0.42 : 1;
   const { lift, rotX, rotY, rotZ, cardOpacity, rimAlpha } = useSpring({
     lift: screenOverlay
       ? hoverLiftAmount
@@ -278,7 +286,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
     rotX: disabled || !pointerTilt ? 0 : tilt.x * maxTilt,
     rotY: disabled || !pointerTilt ? 0 : tilt.y * maxTilt,
     rotZ: disabled ? 0 : tapRz,
-    cardOpacity: disabled && !opaqueWhenDisabled ? 0.42 : 1,
+    cardOpacity: dimmedOpacity,
     rimAlpha: showRim ? rimStrength : 0,
     config: { mass: 0.45, tension: 400, friction: 28 },
   });
@@ -336,15 +344,46 @@ export const Card = forwardRef<Group, CardProps>(function Card(
     [cornerRadius]
   );
 
+  const emitCardContextMenu = useCallback(
+    (clientX: number, clientY: number) => {
+      events.onCardContextMenu(id, { clientX, clientY });
+      events.onCardSelect(id);
+    },
+    [events, id]
+  );
+
   const onPointerDown = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
+      const ne = e.nativeEvent;
+      /**
+       * Context menu must work even when `disabled` (e.g. demo “inactive” hand slot): still
+       * non-draggable / no primary tap, but inspect / settings via right-click or Ctrl/Cmd+click.
+       */
+      if (ne.button === 2) {
+        e.stopPropagation();
+        ne.preventDefault();
+        emitCardContextMenu(ne.clientX, ne.clientY);
+        return;
+      }
+      if (ne.button === 0 && (ne.ctrlKey || ne.metaKey)) {
+        e.stopPropagation();
+        ne.preventDefault();
+        emitCardContextMenu(ne.clientX, ne.clientY);
+        return;
+      }
       if (disabled) {
         return;
       }
       e.stopPropagation();
+      /**
+       * Open here — not only `onContextMenu`. R3F only delivers `contextmenu` when the hit is in
+       * `initialHits` from the same gesture’s `pointerdown`, and hosts (e.g. hand reorder) may
+       * capture the pointer on primary button. Secondary button and Ctrl/Cmd+primary must not
+       * reach reorder / strip-drag `onCardPointerDown`.
+       */
       onCardPointerDown?.(e);
     },
-    [disabled, onCardPointerDown]
+    [disabled, emitCardContextMenu, onCardPointerDown]
   );
 
   const onPointerUp = useCallback(
@@ -394,13 +433,34 @@ export const Card = forwardRef<Group, CardProps>(function Card(
     [disabled]
   );
 
+  const onContextMenu = useCallback(
+    (e: ThreeEvent<MouseEvent>) => {
+      e.stopPropagation();
+      const ne = e.nativeEvent;
+      ne.preventDefault();
+      emitCardContextMenu(ne.clientX, ne.clientY);
+    },
+    [emitCardContextMenu]
+  );
+
   const onClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
       if (disabled) {
         return;
       }
       e.stopPropagation();
-      events.onCardTap(id);
+      const ne = e.nativeEvent;
+      /** Ctrl/Cmd+primary is handled in `onPointerDown` (fires before fan / strip capture). */
+      if (ne.button === 0 && (ne.ctrlKey || ne.metaKey)) {
+        return;
+      }
+      events.onCardTap(id, {
+        button: ne.button,
+        shiftKey: ne.shiftKey,
+        altKey: ne.altKey,
+        metaKey: ne.metaKey,
+        ctrlKey: ne.ctrlKey,
+      });
       events.onCardSelect(id);
     },
     [disabled, events, id]
@@ -408,7 +468,8 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 
   const onPointerDoubleClick = useCallback(
     (e: ThreeEvent<MouseEvent>) => {
-      if (disabled) {
+      /** Host actions (e.g. hand → front strip) even when `disabled` blocks single tap / drag. */
+      if (disabled && !onCardDoubleClick) {
         return;
       }
       e.stopPropagation();
@@ -441,13 +502,19 @@ export const Card = forwardRef<Group, CardProps>(function Card(
       ref={assignRootRef}
     >
       <AnimatedGroup
+        userData={{ tcglCardLiftGroup: true }}
         position-y={screenOverlay ? 0 : lift}
         position-z={screenOverlay ? lift : 0}
         renderOrder={
           hovered && !disabled ? 6 : selected && !disabled ? 5 : 0
         }
       >
-        <group ref={flipArcRef}>
+        <group
+          position-z={
+            screenOverlay && ghosted ? SCREEN_OVERLAY_GHOST_PICK_Z_NUDGE : 0
+          }
+        >
+          <group ref={flipArcRef} userData={{ tcglCardFlipArcGroup: true }}>
           <group
             rotation={
               screenOverlay
@@ -467,9 +534,13 @@ export const Card = forwardRef<Group, CardProps>(function Card(
               onPointerDown={onPointerDown}
               onPointerUp={onPointerUp}
               onClick={onClick}
+              onContextMenu={onContextMenu}
               onDoubleClick={onPointerDoubleClick}
             >
-              <FlipRig rotation-y={flipR}>
+              <FlipRig
+                userData={{ tcglCardFlipRigGroup: true }}
+                rotation-y={flipR}
+              >
                 {/* receiveShadow off: PCF shadow maps band on thin tilted quads (diagonal lines on art). */}
                 <mesh
                   userData={{ tcglCardFace: "front" as const }}
@@ -544,6 +615,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
               </FlipRig>
             </AnimatedGroup>
           </group>
+        </group>
         </group>
       </AnimatedGroup>
     </group>

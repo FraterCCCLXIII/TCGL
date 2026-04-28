@@ -1,4 +1,11 @@
-import { Children, cloneElement, isValidElement, type ReactNode } from "react";
+import {
+  Children,
+  cloneElement,
+  forwardRef,
+  isValidElement,
+  type ReactNode,
+} from "react";
+import type { Group } from "three";
 import { cardStackIndex } from "../layout/stackLayout";
 import type { R3FGroupProps } from "../types";
 
@@ -8,10 +15,13 @@ export type CardStackProps = {
 } & R3FGroupProps;
 
 /** Ordered, neat vertical stack (deck / resolution). */
-export function CardStack({ children, yStep = 0.02, ...groupProps }: CardStackProps) {
+export const CardStack = forwardRef<Group, CardStackProps>(function CardStack(
+  { children, yStep = 0.02, ...groupProps },
+  ref
+) {
   const list = Children.toArray(children);
   return (
-    <group {...groupProps}>
+    <group ref={ref} {...groupProps}>
       {list.map((child, i) => {
         if (!isValidElement(child)) {
           return child;
@@ -25,4 +35,4 @@ export function CardStack({ children, yStep = 0.02, ...groupProps }: CardStackPr
       })}
     </group>
   );
-}
+});
