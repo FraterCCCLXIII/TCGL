@@ -23,22 +23,23 @@ export function tableCardInnerUniform(cardId: string, state: GameState): number 
   return demoCardScaleById(cardId, state);
 }
 
-/** Wrapper scales for CardMotion while child Card keeps constant `innerUniform`. */
-export function motionWrapperScaledPair(
+/**
+ * Flight endpoints when the animated object is the **real card root** under an attach shell (no
+ * CardMotion wrapper). Interpolate **absolute** uniform scale — crossing HUD vs table regimes cannot
+ * share one “inner uniform” divisor (that split only applies to CardMotion).
+ */
+export function attachedFlightPoseEndpoints(
   fromSampled: CardSpatialPose,
-  toPose: CardSpatialPose,
-  innerUniform: number
+  toPose: CardSpatialPose
 ): { from: CardSpatialPose; to: CardSpatialPose } {
-  const sf = fromSampled.scale ?? 1;
-  const destUniform = toPose.scale ?? innerUniform;
   return {
     from: {
       ...fromSampled,
-      scale: sf / innerUniform,
+      scale: fromSampled.scale ?? 1,
     },
     to: {
       ...toPose,
-      scale: destUniform / innerUniform,
+      scale: toPose.scale ?? 1,
     },
   };
 }

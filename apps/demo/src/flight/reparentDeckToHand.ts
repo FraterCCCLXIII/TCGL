@@ -38,8 +38,9 @@ export type ReparentDeckFlightDeps = {
 
 /**
  * Attach deck root → flight shell (preserve world transform), drive tween, then land in HUD slot.
- * P1 deck→hand uses {@link DeckFlightPilot} + {@link ../App.tsx} `deckFlightShellRef.attach` instead.
+ * Deck→hand uses {@link ./AttachedFlightPilot} + {@link ../App.tsx}
+ * `flightShellNearRef` / `flightShellFarRef` `.attach` instead.
  */
 export function attachDeckCardForFlightShell(_deps: ReparentDeckFlightDeps): void {
-  /* Reserved for optional imperative helpers — animation runs in DeckFlightPilot */
+  /* Reserved for optional imperative helpers — animation runs in AttachedFlightPilot */
 }

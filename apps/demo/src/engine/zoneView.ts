@@ -137,6 +137,25 @@ export function computeFrontPlayCardPosePA(
 }
 
 /**
+ * Strip landing pose using the same offsets as {@link getFrontPlayVisualOffsets} (stacks / piles),
+ * so flight end pose matches declarative layout.
+ */
+export function computeFrontPlayCardPoseFromVisualOffsets(
+  cardId: string,
+  offsetById: Record<string, [number, number, number]>
+): CardSpatialPose {
+  const off = offsetById[cardId] ?? [0, 0, 0];
+  return {
+    position: [
+      FRONT_PLAY_ZONE_PA.position[0] + off[0]!,
+      FRONT_PLAY_ZONE_PA.position[1] + off[1]!,
+      FRONT_PLAY_ZONE_PA.position[2] + off[2]!,
+    ],
+    rotation: [0, 0, 0],
+  };
+}
+
+/**
  * Approximate hand fan centroid (PlayerArea space). Tune next to `HandZone`
  * `position={[-0.2, 0, 1.1]}`.
  */

@@ -14,12 +14,15 @@ import {
   BackSide,
   FrontSide,
   Group,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
   SRGBColorSpace,
   type Texture,
 } from "three";
 import { useTCGL, useTCGLEvents } from "../context/TCGLContext";
 import { DEFAULT_CARD_H, DEFAULT_CARD_W } from "../constants/dimensions";
 import { createRoundedCardAlphaMap } from "../utils/roundedCardAlphaMap";
+import { createRoundedCardEdgeGeometry } from "../utils/roundedCardEdgeGeometry";
 import { getCardRimWorldRadius } from "../utils/cardRimParams";
 import { CardEdgeRim } from "./CardEdgeRim";
 import type { CardView, R3FGroupProps, Vec3 } from "../types";
@@ -73,6 +76,11 @@ export type CardProps = CardView & {
    * opaque while remaining non-interactive (e.g. drag ghosts and zone-motion overlays).
    */
   opaqueWhenDisabled?: boolean;
+  /**
+   * Local Z separation between front and back (world length before `cardScale`). Small edge quads
+   * fill the rim so tilted cards read as stock. Set `0` for the previous paper-thin double plane.
+   */
+  thickness?: number;
 } & R3FGroupProps;
 
 /**
@@ -112,6 +120,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
   pointerTilt = true,
   screenOverlay = false,
   opaqueWhenDisabled = false,
+  thickness = 0.018,
   ...groupProps
 }: CardProps,
   ref: Ref<Group>
@@ -149,6 +158,44 @@ export const Card = forwardRef<Group, CardProps>(function Card(
       alphaMap?.dispose();
     };
   }, [alphaMap]);
+
+  const edgeMat = useMemo(() => {
+    if (screenOverlay) {
+      return new MeshBasicMaterial({ color: "#333333" });
+    }
+    return new MeshStandardMaterial({
+      color: "#252525",
+      roughness: 0.75,
+      metalness: 0.05,
+    });
+  }, [screenOverlay]);
+
+  useLayoutEffect(() => {
+    return () => {
+      edgeMat.dispose();
+    };
+  }, [edgeMat]);
+
+  const useStockThickness = thickness > 0;
+  const halfDepth = useStockThickness ? thickness / 2 : 0.0002;
+
+  const edgeGeometry = useMemo(() => {
+    if (!useStockThickness) {
+      return null;
+    }
+    return createRoundedCardEdgeGeometry(
+      DEFAULT_CARD_W,
+      DEFAULT_CARD_H,
+      cornerRadius,
+      thickness
+    );
+  }, [useStockThickness, cornerRadius, thickness]);
+
+  useLayoutEffect(() => {
+    return () => {
+      edgeGeometry?.dispose();
+    };
+  }, [edgeGeometry]);
 
   // After lay-flat (rotate -90° on X), local Z is world +Y, so a tabletop MTG-style tap is
   // rotation on Z — not on Y (which goes through the card edge and reads as a hinge, not a tap).
@@ -350,6 +397,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                 ? [0, 0, 0]
                 : ([-Math.PI / 2, 0, 0] as [number, number, number])
             }
+            userData={{ tcglLayFlatPitchGroup: true }}
           >
             <AnimatedGroup
               rotation-x={rotX}
@@ -366,10 +414,11 @@ export const Card = forwardRef<Group, CardProps>(function Card(
               <FlipRig rotation-y={flipR}>
                 {/* receiveShadow off: PCF shadow maps band on thin tilted quads (diagonal lines on art). */}
                 <mesh
+                  userData={{ tcglCardFace: "front" as const }}
                   castShadow={allowShadow}
                   receiveShadow={false}
                   frustumCulled={false}
-                  position={[0, 0, 0.0002]}
+                  position={[0, 0, halfDepth]}
                   renderOrder={2}
                 >
                   <planeGeometry args={[DEFAULT_CARD_W, DEFAULT_CARD_H]} />
@@ -410,10 +459,11 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                   )}
                 </mesh>
                 <mesh
+                  userData={{ tcglCardFace: "back" as const }}
                   castShadow={allowShadow}
                   receiveShadow={false}
                   frustumCulled={false}
-                  position={[0, 0, -0.0002]}
+                  position={[0, 0, -halfDepth]}
                   renderOrder={1}
                 >
                   <planeGeometry args={[DEFAULT_CARD_W, DEFAULT_CARD_H]} />
@@ -454,6 +504,15 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                     />
                   )}
                 </mesh>
+                {useStockThickness && edgeGeometry ? (
+                  <mesh
+                    geometry={edgeGeometry}
+                    material={edgeMat}
+                    castShadow={false}
+                    receiveShadow={false}
+                    renderOrder={0}
+                  />
+                ) : null}
               </FlipRig>
             </AnimatedGroup>
           </group>

@@ -2,6 +2,12 @@
 export * from "./types";
 export { DEFAULT_CARD_H, DEFAULT_CARD_W } from "./constants/dimensions";
 export { createRoundedCardAlphaMap } from "./utils/roundedCardAlphaMap";
+export {
+  applyCardLayFlatGroupHudPitch,
+  applyCardLayFlatGroupTablePitch,
+  convertCardFaceMaterialsHudToTable,
+  convertCardFaceMaterialsTableToHud,
+} from "./utils/cardPresentationBridge";
 export { TCGLProvider, useTCGL, useTCGLEvents } from "./context/TCGLContext";
 export { TCGLCanvas, type TCGLCanvasProps } from "./components/TCGLCanvas";
 export { Playmat, type PlaymatGridConfig, type PlaymatProps } from "./components/Playmat";

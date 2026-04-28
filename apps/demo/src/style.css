@@ -22,6 +22,33 @@ body,
   pointer-events: none;
 }
 
+/**
+ * Demo HUD art — top-left, between WebGL (below) and `.demo-chrome` (above).
+ * z-index 19 keeps it under settings FAB/drawer (20+) while staying above the canvas.
+ */
+.demo-game-hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 19;
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 0.2rem 0.35rem;
+  pointer-events: none;
+}
+
+.demo-game-hud__svg {
+  display: block;
+  width: min(42vw, 220px);
+  height: auto;
+  max-height: min(11vh, 72px);
+  object-fit: contain;
+  object-position: top left;
+  opacity: 0.93;
+  user-select: none;
+}
+
 .demo-drawer-fab {
   position: fixed;
   right: 0.75rem;
