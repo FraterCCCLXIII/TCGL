@@ -137,6 +137,7 @@ export function ReorderableCardFan({
   zBowl,
   zHand,
   y,
+  invertFanX,
   faceTiltX = 0,
   ...groupProps
 }: ReorderableCardFanProps) {
@@ -184,8 +185,21 @@ export function ReorderableCardFan({
         zBowl,
         zHand,
         y,
+        invertFanX,
       }) as Parameters<typeof cardFanLayout>[1] & FanOptions,
-    [n, radius, arc, style, minCenterSpacing, maxRollZ, yArch, zBowl, zHand, y]
+    [
+      n,
+      radius,
+      arc,
+      style,
+      minCenterSpacing,
+      maxRollZ,
+      yArch,
+      zBowl,
+      zHand,
+      y,
+      invertFanX,
+    ]
   );
 
   cardIdsRef.current = cardIds;

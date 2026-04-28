@@ -158,11 +158,60 @@ const DEMO_HAND_FAN_LAYOUT = {
   maxRollZ: 0.05,
 };
 
+/**
+ * Matches `App.tsx` viewport `ReorderableCardFan` next to each HUD hand — keep radii/spacing/yArch in sync.
+ * Used for CardMotion landing pose so eased rotation matches the fan slot (no end pop).
+ */
+const VIEWPORT_HAND_FAN_LAYOUT_P1 = {
+  radius: 0.92,
+  minCenterSpacing: 0.76,
+  style: "ecard" as const,
+  zBowl: 0.004,
+  maxRollZ: 0.05,
+};
+
+const VIEWPORT_HAND_FAN_LAYOUT_P2 = {
+  radius: 0.55,
+  minCenterSpacing: 0.42,
+  style: "ecard" as const,
+  zBowl: 0.004,
+  yArch: -0.016,
+  maxRollZ: -0.055,
+};
+
+/**
+ * Fan slot pose (PA space) matching the viewport HUD hand — position **and** rotation from {@link cardFanLayout}.
+ */
+export function computeViewportHandSlotPosePA(
+  slotIndex: number,
+  count: number,
+  playerId: "p1" | "p2"
+): CardSpatialPose {
+  const layout =
+    playerId === "p2" ? VIEWPORT_HAND_FAN_LAYOUT_P2 : VIEWPORT_HAND_FAN_LAYOUT_P1;
+  const { position, rotation } = cardFanLayout(slotIndex, {
+    ...layout,
+    count: Math.max(1, count),
+  });
+  return {
+    position: [
+      HAND_ZONE_PA_POSITION[0] + position[0]!,
+      HAND_ZONE_PA_POSITION[1] + position[1]!,
+      HAND_ZONE_PA_POSITION[2] + position[2]!,
+    ],
+    rotation: [
+      rotation[0] ?? 0,
+      rotation[1] ?? 0,
+      rotation[2] ?? 0,
+    ],
+  };
+}
+
 /** Landing pose in PlayerArea space (`handIdsOrdered` is the hand zone list **after** the draw). */
 export function computeHandCardPosePA(
   cardId: string,
   handIdsOrdered: string[],
-  opts?: { scale?: number }
+  opts?: { scale?: number; invertFanX?: boolean }
 ): CardSpatialPose {
   const j = handIdsOrdered.indexOf(cardId);
   const n = Math.max(1, handIdsOrdered.length);
@@ -170,6 +219,7 @@ export function computeHandCardPosePA(
   const { position } = cardFanLayout(i, {
     ...DEMO_HAND_FAN_LAYOUT,
     count: n,
+    invertFanX: opts?.invertFanX,
   });
   const pose: CardSpatialPose = {
     position: [
@@ -191,7 +241,8 @@ export function computeHandCardPosePA(
  */
 export function handDropInsertIndexFromPALocal(
   dropLX: number,
-  handIdsBeforeInsert: readonly string[]
+  handIdsBeforeInsert: readonly string[],
+  layoutOpts?: { invertFanX?: boolean }
 ): number {
   const n = handIdsBeforeInsert.length;
   const totalAfter = n + 1;
@@ -205,6 +256,7 @@ export function handDropInsertIndexFromPALocal(
     const { position } = cardFanLayout(insertIdx, {
       ...DEMO_HAND_FAN_LAYOUT,
       count: totalAfter,
+      invertFanX: layoutOpts?.invertFanX,
     });
     const cx = zx + position[0]!;
     const d = Math.abs(dropLX - cx);

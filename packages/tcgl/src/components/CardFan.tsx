@@ -20,7 +20,13 @@ export type CardFanProps = {
   faceTiltX?: number;
 } & Pick<
   Partial<FanOptions>,
-  "minCenterSpacing" | "maxRollZ" | "yArch" | "zBowl" | "zHand" | "y"
+  | "minCenterSpacing"
+  | "maxRollZ"
+  | "yArch"
+  | "zBowl"
+  | "zHand"
+  | "y"
+  | "invertFanX"
 > &
   R3FGroupProps;
 
@@ -38,6 +44,7 @@ export function CardFan({
   zBowl,
   zHand,
   y,
+  invertFanX,
   faceTiltX = 0,
   ...groupProps
 }: CardFanProps) {
@@ -58,6 +65,7 @@ export function CardFan({
       zBowl,
       zHand,
       y,
+      invertFanX,
     });
     return (
       <group key={child.key ?? i} position={position} rotation={rotation}>

@@ -3,10 +3,12 @@ import { easeInOutCubic, easeOutQuad } from "./easing";
 
 /** Tunings you can spread onto `useCardMotion` / `CardMotion` props. */
 export const CARD_MOTION_PRESETS = {
+  /** Physics spring — avoids stacking easing on top of spring progress (see `useCardMotion`). */
   deckToHand: {
-    arcLiftMax: 0.28,
-    durationMs: 560,
-    easing: easeInOutCubic,
+    arcLiftMax: 0.32,
+    durationMs: 0,
+    tension: 92,
+    friction: 24,
   },
   /** Face-down battlefield discard toward grave pile — subtle arc, quicker settle. */
   toDiscard: {

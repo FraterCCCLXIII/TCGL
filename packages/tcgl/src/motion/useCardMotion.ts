@@ -7,6 +7,10 @@ import { easeInOutCubic } from "./easing";
 import { interpolateCardPose } from "./interpolateCardPose";
 import { resolveFaceUpAtProgress } from "./resolveFaceUp";
 
+function clamp01(x: number): number {
+  return Math.min(1, Math.max(0, x));
+}
+
 export type UseCardMotionOptions = {
   from: CardSpatialPose;
   to: CardSpatialPose;
@@ -14,7 +18,10 @@ export type UseCardMotionOptions = {
   active: boolean;
   /** Vertical sine bump along the chord (world units). */
   arcLiftMax?: number;
-  /** Maps linear spring progress `raw ∈ [0,1]` to eased `u` for pose + flip timing. */
+  /**
+   * Maps duration-mode progress through easing. When `durationMs === 0` (physics spring), progress
+   * is clamped to `[0, 1]` only — extra easing is skipped so motion follows the spring curve.
+   */
   easing?: (raw: number) => number;
   flip?: CardMotionFlip;
   onComplete?: () => void;
@@ -107,7 +114,7 @@ export function useCardMotion({
     }
 
     const raw = progress.get();
-    const u = easing(raw);
+    const u = durationMs === 0 ? clamp01(raw) : easing(raw);
     const pose = interpolateCardPose(
       fromRef.current,
       toRef.current,

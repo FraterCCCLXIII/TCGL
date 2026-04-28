@@ -45,6 +45,10 @@ export type FanOptions = {
    * @default ~1.18
    */
   minCenterSpacing?: number;
+  /**
+   * Mirror the fan horizontally (negate X and roll): bottom-hand vs top/opponent HUD symmetry.
+   */
+  invertFanX?: boolean;
 };
 
 /** With zone `y=0` on the playmat, use 0 here — `Card` applies `tableClearance` so faces sit above the mat. */
@@ -72,10 +76,14 @@ function cardFanEcard(i: number, n: number, opts: FanOptions): { position: Vec3;
   }
   const u = i / (n - 1);
   const t = 2 * u - 1;
-  const x = (-spreadX / 2) * t;
+  let x = (-spreadX / 2) * t;
   const y = y0 + yArch * t * t;
   const z = z0 - zBowl * (1 - t * t);
-  const rollZ = t * maxRollZ;
+  let rollZ = t * maxRollZ;
+  if (opts.invertFanX) {
+    x = -x;
+    rollZ = -rollZ;
+  }
   return { position: [x, y, z], rotation: [0, 0, rollZ] };
 }
 
@@ -100,11 +108,16 @@ function cardFanArc(i: number, n: number, opts: FanOptions): { position: Vec3; r
     rX0,
     minGap / (2 * Math.max(1e-4, Math.sin(dAngle / 2)))
   );
-  const x = Math.sin(a) * rX;
+  let x = Math.sin(a) * rX;
   const z = -Math.cos(a) * rLine * 0.1 + DEFAULT_Z;
+  let ry = a * 0.22;
+  if (opts.invertFanX) {
+    x = -x;
+    ry = -ry;
+  }
   return {
     position: [x, y, z],
-    rotation: [0, a * 0.22, 0],
+    rotation: [0, ry, 0],
   };
 }
 

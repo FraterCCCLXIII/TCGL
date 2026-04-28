@@ -8,6 +8,13 @@ const BASE = "/cards";
 const face = (n: number) => `${BASE}/face-${n}.png`;
 const BACK = `${BASE}/back.png`;
 
+/** Default HUD scale for the near (user) viewport hand — {@link viewportFlatScale} overrides. */
+export const VIEWPORT_HAND_SCALE_NEAR = 0.62;
+/** Smaller default for the top opponent viewport hand (tune independently of near hand). */
+export const VIEWPORT_HAND_SCALE_OPPONENT = 0.34;
+/** Hover lift on opponent HUD cards — negative matches Card default magnitude but moves toward playmat. */
+export const VIEWPORT_HAND_HOVER_LIFT_OPPONENT = -0.12;
+
 /** Face-down pile — card id still listed in either deck zone (both players). */
 function isCardOnDeckStack(state: GameState, id: string): boolean {
   return (
@@ -82,6 +89,17 @@ type DemoCard3dTableProps = {
    * (`rotation={[0, Math.PI, 0]}`).
    */
   opponentReadableOrientation?: boolean;
+  /**
+   * Screen-fixed HUD hand — {@link Card} `screenOverlay`: portrait plane parallel to the viewport,
+   * no table tilt (reference: docked digital-hand UX).
+   */
+  viewportScreenFlat?: boolean;
+  /**
+   * Multiplier on {@link cardScaleById} when `viewportScreenFlat` (default {@link VIEWPORT_HAND_SCALE_NEAR}).
+   */
+  viewportFlatScale?: number;
+  /** Passed through to {@link Card} `hoverLift` (defaults when omitted — typically `0.12`). */
+  hoverLift?: number;
 };
 
 /**
@@ -105,6 +123,9 @@ export function DemoCard3dTable({
   motionFaceUp,
   hideCardFace = false,
   opponentReadableOrientation = false,
+  viewportScreenFlat = false,
+  viewportFlatScale,
+  hoverLift,
   position: positionP,
 }: DemoCard3dTableProps) {
   const c = state.cards[id];
@@ -114,19 +135,30 @@ export function DemoCard3dTable({
   const isHand4 = id === "c-hand-4";
   const isHand3 = id === "c-hand-3";
   const isDrag = id === DRAG_CARD_ID;
+
   return (
     <Card
       ref={setCardGroupRef(id) as never}
       id={id}
       position={positionP}
       rotation={
-        opponentReadableOrientation
-          ? ([0, Math.PI, 0] as [number, number, number])
-          : [0, 0, 0]
+        viewportScreenFlat
+          ? [0, 0, 0]
+          : opponentReadableOrientation
+            ? ([0, Math.PI, 0] as [number, number, number])
+            : [0, 0, 0]
       }
       face={face(fn)}
       back={BACK}
-      cardScale={cardScaleById(id, state)}
+      cardScale={
+        viewportScreenFlat
+          ? cardScaleById(id, state) *
+            (viewportFlatScale ?? VIEWPORT_HAND_SCALE_NEAR)
+          : cardScaleById(id, state)
+      }
+      screenOverlay={viewportScreenFlat}
+      pointerTilt={!viewportScreenFlat}
+      {...(hoverLift !== undefined ? { hoverLift } : {})}
       faceUp={
         hideCardFace
           ? false
@@ -144,7 +176,7 @@ export function DemoCard3dTable({
       tapped={isHand3 ? oneTapped : undefined}
       onCardPointerDown={
         onCardPointerDownProp || (isDrag && onDragPointer)
-          ? (e) => {
+          ? (e: ThreeEvent<PointerEvent>) => {
               onCardPointerDownProp?.(e);
               if (isDrag && onDragPointer) onDragPointer.onPointerDown();
             }

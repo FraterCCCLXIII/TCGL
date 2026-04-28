@@ -66,7 +66,7 @@ import {
   allOnTableCardIds,
   battlefieldGroupCentersXZ,
   computeFrontPlayCardPosePA,
-  computeHandCardPosePA,
+  computeViewportHandSlotPosePA,
   frontPlayPACentersXZ,
   frontPlayReorderTargetIndex,
   getBattlefieldIds,
@@ -92,11 +92,19 @@ import {
   DRAG_CARD_ID,
 } from "./engine/zoneView";
 import {
+  motionWrapperScaledPair,
+  tableCardInnerUniform,
+  viewportHandInnerUniform,
+} from "./engine/cardMotionUniform";
+import {
   DemoCard3dTable,
   DemoCard3dRead,
   demoCardScaleById,
   face,
   BACK,
+  VIEWPORT_HAND_HOVER_LIFT_OPPONENT,
+  VIEWPORT_HAND_SCALE_NEAR,
+  VIEWPORT_HAND_SCALE_OPPONENT,
 } from "./DemoCard3d";
 import { CameraAttachedHandsRoot } from "./ViewportHandsLayer";
 
@@ -126,6 +134,19 @@ const MOTION_DEMO_TO = {
 
 /** Default demo camera; `lookAt` is origin — distance scales dolly in/out. */
 const BASE_CAMERA: [number, number, number] = [0, 6.4, 7.2];
+
+/** Tighter horizontal packing than table fans (viewport HUD cards use a smaller scale). */
+const VIEWPORT_HAND_FAN_RADIUS = 0.92;
+const VIEWPORT_HAND_FAN_MIN_CENTER_SPACING = 0.76;
+/** Opponent HUD cards use {@link VIEWPORT_HAND_SCALE_OPPONENT}; pack centers proportionally tighter. */
+const VIEWPORT_HAND_FAN_RADIUS_OPPONENT = 0.55;
+const VIEWPORT_HAND_FAN_MIN_CENTER_SPACING_OPPONENT = 0.42;
+/** Opposite chirality from near-hand fan — inverted rainbow along the top HUD. */
+const VIEWPORT_HAND_FAN_MAX_ROLL_Z_OPPONENT = -0.055;
+/** Wing cards dip slightly toward the playmat versus center. */
+const VIEWPORT_HAND_FAN_Y_ARCH_OPPONENT = -0.016;
+/** Extra X on opponent HUD root — cancels shared HandZone −0.2 so the fan nets centered horizontally. */
+const VIEWPORT_HAND_HUD_ROOT_OFFSET_X_OPPONENT = 0.2;
 
 type Log = { t: string; m: string };
 
@@ -602,15 +623,14 @@ export function App() {
       const from = sampleCardSpatialPoseInAncestor(g, pa);
       const nextFp = [...fpIds, cardId];
       const to = computeFrontPlayCardPosePA(cardId, nextFp);
-      if (from.scale !== undefined) {
-        to.scale = from.scale;
-      }
+      const innerDest = tableCardInnerUniform(cardId, engine.state);
+      const { from: fromW, to: toW } = motionWrapperScaledPair(from, to, innerDest);
       setZoneFlight({
         playerId: "p1",
         cardId,
         kind: "hand-to-front",
-        from,
-        to,
+        from: fromW,
+        to: toW,
         nonce: Date.now(),
       });
       push(`hand → front play (anim): ${cardId}`);
@@ -655,15 +675,14 @@ export function App() {
       const from = sampleCardSpatialPoseInAncestor(g, pa);
       const nextFp = [...fpIdsP2, cardId];
       const to = computeFrontPlayCardPosePA(cardId, nextFp);
-      if (from.scale !== undefined) {
-        to.scale = from.scale;
-      }
+      const innerDest = tableCardInnerUniform(cardId, engine.state);
+      const { from: fromW, to: toW } = motionWrapperScaledPair(from, to, innerDest);
       setZoneFlight({
         playerId: "p2",
         cardId,
         kind: "hand-to-front",
-        from,
-        to,
+        from: fromW,
+        to: toW,
         nonce: Date.now(),
       });
       push(`p2 hand → front play (anim): ${cardId}`);
@@ -710,21 +729,30 @@ export function App() {
         push(`front play → hand: ${cardId}`);
         return;
       }
+      const insertIdx = handDropInsertIndexFromPALocal(
+        HAND_RETURN_TARGET_PA.position[0],
+        handIds
+      );
+      const nextHand = [
+        ...handIds.slice(0, insertIdx),
+        cardId,
+        ...handIds.slice(insertIdx),
+      ];
+      const slotIdx = nextHand.indexOf(cardId);
       const from = sampleCardSpatialPoseInAncestor(g, pa);
-      let to: CardSpatialPose = {
-        ...HAND_RETURN_TARGET_PA,
-        ...(from.scale !== undefined ? { scale: from.scale } : {}),
-      };
+      let to = computeViewportHandSlotPosePA(slotIdx, nextHand.length, "p1");
       const hud = viewportP1HandHudRef.current;
       if (hud && pa) {
         to = mapHandPaPoseToPlayerAreaMotionSpace(to, hud, pa);
       }
+      const innerDest = viewportHandInnerUniform(cardId, engine.state, "p1");
+      const { from: fromW, to: toW } = motionWrapperScaledPair(from, to, innerDest);
       setZoneFlight({
         playerId: "p1",
         cardId,
         kind: "front-to-hand",
-        from,
-        to,
+        from: fromW,
+        to: toW,
         nonce: Date.now(),
       });
       push(`front play → hand (anim): ${cardId}`);
@@ -744,20 +772,52 @@ export function App() {
       if (!fpIdsP2.includes(cardId)) {
         return;
       }
+      const g = cardGroupById.current.get(cardId);
+      const pa = opponentAreaRef.current;
+      if (!g || !pa) {
+        const insertIdx = handDropInsertIndexFromPALocal(
+          HAND_RETURN_TARGET_PA.position[0],
+          opponentHandIds
+        );
+        engine.dispatch(
+          moveCardAction(
+            "p2",
+            cardId,
+            demoZones.p2FrontPlay,
+            demoZones.p2Hand,
+            insertIdx
+          )
+        );
+        push(`p2 front play → hand: ${cardId}`);
+        return;
+      }
       const insertIdx = handDropInsertIndexFromPALocal(
         HAND_RETURN_TARGET_PA.position[0],
         opponentHandIds
       );
-      engine.dispatch(
-        moveCardAction(
-          "p2",
-          cardId,
-          demoZones.p2FrontPlay,
-          demoZones.p2Hand,
-          insertIdx
-        )
-      );
-      push(`p2 front play → hand: ${cardId}`);
+      const nextHand = [
+        ...opponentHandIds.slice(0, insertIdx),
+        cardId,
+        ...opponentHandIds.slice(insertIdx),
+      ];
+      const slotIdx = nextHand.indexOf(cardId);
+      const from = sampleCardSpatialPoseInAncestor(g, pa);
+      let to = computeViewportHandSlotPosePA(slotIdx, nextHand.length, "p2");
+      const hud = viewportP2HandHudRef.current;
+      if (hud && pa) {
+        to = mapHandPaPoseToPlayerAreaMotionSpace(to, hud, pa);
+      }
+      const innerDest = viewportHandInnerUniform(cardId, engine.state, "p2");
+      const { from: fromW, to: toW } = motionWrapperScaledPair(from, to, innerDest);
+      setZoneFlight({
+        playerId: "p2",
+        cardId,
+        kind: "front-to-hand",
+        from: fromW,
+        to: toW,
+        nonce: Date.now(),
+      });
+      push(`p2 front play → hand (anim): ${cardId}`);
     },
     [
       deckFlight,
@@ -870,18 +930,22 @@ export function App() {
         playerId === "p1"
           ? viewportP1HandHudRef.current
           : viewportP2HandHudRef.current;
-      let to = computeHandCardPosePA(cardId, nextHand);
+      const slotIdx = nextHand.indexOf(cardId);
+      let to = computeViewportHandSlotPosePA(
+        slotIdx,
+        nextHand.length,
+        playerId
+      );
       if (hudRoot && pa) {
         to = mapHandPaPoseToPlayerAreaMotionSpace(to, hudRoot, pa);
       }
-      if (from.scale !== undefined) {
-        to.scale = from.scale;
-      }
+      const innerDest = viewportHandInnerUniform(cardId, engine.state, playerId);
+      const { from: fromW, to: toW } = motionWrapperScaledPair(from, to, innerDest);
       setDeckFlight({
         playerId,
         cardId,
-        from,
-        to,
+        from: fromW,
+        to: toW,
         nonce: Date.now(),
       });
       push(`${playerId} deck → hand (anim): ${cardId}`);
@@ -1383,6 +1447,8 @@ export function App() {
                   onHandOrderChange={onHandOrderChange}
                   handZoneId={demoZones.hand}
                   onDragTowardTable={onDragTowardTableFromHand}
+                  reorderDamping={7}
+                  previewIndexDamping={6.5}
                   renderCard={(hid) =>
                     zoneFlight?.playerId === "p1" &&
                     zoneFlight.kind === "front-to-hand" &&
@@ -1402,11 +1468,13 @@ export function App() {
                         onToggleFace={toggleFace}
                         oneHighlight={oneHighlight}
                         oneTapped={oneTapped}
+                        viewportScreenFlat
                         onCardDoubleClick={() => playHandToFrontPlay(hid)}
                       />
                     )
                   }
-                  radius={1.2}
+                  radius={VIEWPORT_HAND_FAN_RADIUS}
+                  minCenterSpacing={VIEWPORT_HAND_FAN_MIN_CENTER_SPACING}
                   style="ecard"
                   zBowl={0.004}
                   maxRollZ={0.05}
@@ -1416,8 +1484,7 @@ export function App() {
 
             <group
               ref={viewportP2HandHudRef}
-              position={[0, 1.35, -5.2]}
-              rotation={[0, Math.PI, 0]}
+              position={[VIEWPORT_HAND_HUD_ROOT_OFFSET_X_OPPONENT, 1.35, -5.2]}
             >
               <HandZone id="p2-hand" position={[-0.2, 0, 1.1]}>
                 <ReorderableCardFan
@@ -1447,18 +1514,22 @@ export function App() {
                         onToggleFace={toggleFace}
                         oneHighlight={oneHighlight}
                         oneTapped={oneTapped}
+                        viewportScreenFlat
+                        viewportFlatScale={VIEWPORT_HAND_SCALE_OPPONENT}
+                        hoverLift={VIEWPORT_HAND_HOVER_LIFT_OPPONENT}
                         hideCardFace
-                        opponentReadableOrientation
                         onCardDoubleClick={() =>
                           playOpponentHandToFrontPlay(hid)
                         }
                       />
                     )
                   }
-                  radius={1.2}
+                  radius={VIEWPORT_HAND_FAN_RADIUS_OPPONENT}
+                  minCenterSpacing={VIEWPORT_HAND_FAN_MIN_CENTER_SPACING_OPPONENT}
                   style="ecard"
                   zBowl={0.004}
-                  maxRollZ={0.05}
+                  yArch={VIEWPORT_HAND_FAN_Y_ARCH_OPPONENT}
+                  maxRollZ={VIEWPORT_HAND_FAN_MAX_ROLL_Z_OPPONENT}
                 />
               </HandZone>
             </group>
@@ -1531,6 +1602,14 @@ export function App() {
                     oneHighlight={false}
                     oneTapped={false}
                     pickDisabled
+                    viewportScreenFlat={
+                      zoneFlight.kind === "front-to-hand"
+                    }
+                    viewportFlatScale={
+                      zoneFlight.kind === "front-to-hand"
+                        ? VIEWPORT_HAND_SCALE_NEAR
+                        : undefined
+                    }
                   />
                 </CardMotion>
               ) : null}
@@ -1560,6 +1639,8 @@ export function App() {
                       oneTapped={false}
                       pickDisabled
                       deckDrawFlight
+                      viewportScreenFlat
+                      viewportFlatScale={VIEWPORT_HAND_SCALE_NEAR}
                     />
                   )}
                 </CardMotion>
@@ -1711,31 +1792,54 @@ export function App() {
               </Zone>
 
               {zoneFlight?.playerId === "p2" &&
-              zoneFlight.kind === "hand-to-front" ? (
+              (zoneFlight.kind === "hand-to-front" ||
+                zoneFlight.kind === "front-to-hand") ? (
                 <CardMotion
                   key={zoneFlight.nonce}
                   active
                   from={zoneFlight.from}
                   to={zoneFlight.to}
                   {...CARD_MOTION_PRESETS.deckToHand}
-                  flip={flipDealRevealFirst(true)}
+                  flip={
+                    zoneFlight.kind === "hand-to-front"
+                      ? flipDealRevealFirst(true)
+                      : undefined
+                  }
                   onComplete={finishZoneFlight}
                   renderOrder={42}
                 >
-                  {(m) => (
+                  {zoneFlight.kind === "hand-to-front" ? (
+                    (m) => (
+                      <DemoCard3dTable
+                        id={zoneFlight.cardId}
+                        state={engine.state}
+                        setCardGroupRef={noopSetCardGroupRef}
+                        isFaceUp={isFaceUp}
+                        motionFaceUp={m.faceUp}
+                        selectedId={null}
+                        inPlay={inPlay}
+                        onToggleFace={toggleFace}
+                        oneHighlight={false}
+                        oneTapped={false}
+                        pickDisabled
+                        opponentReadableOrientation
+                      />
+                    )
+                  ) : (
                     <DemoCard3dTable
                       id={zoneFlight.cardId}
                       state={engine.state}
                       setCardGroupRef={noopSetCardGroupRef}
                       isFaceUp={isFaceUp}
-                      motionFaceUp={m.faceUp}
                       selectedId={null}
                       inPlay={inPlay}
                       onToggleFace={toggleFace}
                       oneHighlight={false}
                       oneTapped={false}
                       pickDisabled
-                      opponentReadableOrientation
+                      viewportScreenFlat
+                      viewportFlatScale={VIEWPORT_HAND_SCALE_OPPONENT}
+                      hideCardFace
                     />
                   )}
                 </CardMotion>
@@ -1767,7 +1871,8 @@ export function App() {
                       pickDisabled
                       deckDrawFlight
                       hideCardFace
-                      opponentReadableOrientation
+                      viewportScreenFlat
+                      viewportFlatScale={VIEWPORT_HAND_SCALE_OPPONENT}
                     />
                   )}
                 </CardMotion>
