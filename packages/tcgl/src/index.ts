@@ -7,6 +7,7 @@ export {
   applyCardLayFlatGroupTablePitch,
   convertCardFaceMaterialsHudToTable,
   convertCardFaceMaterialsTableToHud,
+  resetCardPointerTiltGroup,
   setCardFaceShadowFade,
 } from "./utils/cardPresentationBridge";
 export {

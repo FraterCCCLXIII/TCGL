@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   forwardRef,
+  type MutableRefObject,
   type Ref,
 } from "react";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
@@ -128,6 +129,20 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 }: CardProps,
   ref: Ref<Group>
 ) {
+  /** When non-null, root is still in the scene (e.g. reparented via `attach` + `<primitive>`). */
+  const rootRef = useRef<Group | null>(null);
+  const assignRootRef = useCallback(
+    (node: Group | null) => {
+      rootRef.current = node;
+      if (typeof ref === "function") {
+        ref(node);
+      } else if (ref) {
+        (ref as MutableRefObject<Group | null>).current = node;
+      }
+    },
+    [ref]
+  );
+
   const { shadows: shadowsOn } = useTCGL();
   const events = useTCGLEvents();
   const allowShadow = shadowsOn;
@@ -158,6 +173,9 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 
   useLayoutEffect(() => {
     return () => {
+      if (rootRef.current?.parent) {
+        return;
+      }
       alphaMap?.dispose();
     };
   }, [alphaMap]);
@@ -169,6 +187,9 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 
   useLayoutEffect(() => {
     return () => {
+      if (rootRef.current?.parent) {
+        return;
+      }
       cardShadowDepthMat.dispose();
     };
   }, [cardShadowDepthMat]);
@@ -185,6 +206,9 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 
   useLayoutEffect(() => {
     return () => {
+      if (rootRef.current?.parent) {
+        return;
+      }
       edgeMat.dispose();
     };
   }, [edgeMat]);
@@ -206,6 +230,9 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 
   useLayoutEffect(() => {
     return () => {
+      if (rootRef.current?.parent) {
+        return;
+      }
       edgeGeometry?.dispose();
     };
   }, [edgeGeometry]);
@@ -243,8 +270,11 @@ export const Card = forwardRef<Group, CardProps>(function Card(
 
   const showRim = (hovered || selected || highlighted) && !disabled;
 
+  const hoverLiftAmount = hovered && !disabled ? hoverLift : 0;
   const { lift, rotX, rotY, rotZ, cardOpacity, rimAlpha } = useSpring({
-    lift: tableClearance + (hovered && !disabled ? hoverLift : 0),
+    lift: screenOverlay
+      ? hoverLiftAmount
+      : tableClearance + hoverLiftAmount,
     rotX: disabled || !pointerTilt ? 0 : tilt.x * maxTilt,
     rotY: disabled || !pointerTilt ? 0 : tilt.y * maxTilt,
     rotZ: disabled ? 0 : tapRz,
@@ -408,10 +438,11 @@ export const Card = forwardRef<Group, CardProps>(function Card(
       rotation={rotation as [number, number, number]}
       scale={cardScale}
       {...groupProps}
-      ref={ref}
+      ref={assignRootRef}
     >
       <AnimatedGroup
-        position-y={lift}
+        position-y={screenOverlay ? 0 : lift}
+        position-z={screenOverlay ? lift : 0}
         renderOrder={
           hovered && !disabled ? 6 : selected && !disabled ? 5 : 0
         }
@@ -426,6 +457,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
             userData={{ tcglLayFlatPitchGroup: true }}
           >
             <AnimatedGroup
+              userData={{ tcglCardPointerTiltGroup: true }}
               rotation-x={rotX}
               rotation-y={rotY}
               rotation-z={rotZ}
@@ -504,7 +536,7 @@ export const Card = forwardRef<Group, CardProps>(function Card(
                   <mesh
                     geometry={edgeGeometry}
                     material={edgeMat}
-                    castShadow={false}
+                    castShadow={allowShadow}
                     receiveShadow={false}
                     renderOrder={0}
                   />

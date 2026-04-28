@@ -100,6 +100,8 @@ type DemoCard3dTableProps = {
   viewportFlatScale?: number;
   /** Passed through to {@link Card} `hoverLift` (defaults when omitted — typically `0.12`). */
   hoverLift?: number;
+  /** Passed through to {@link Card} `pointerTilt` (default `true`). */
+  pointerTilt?: boolean;
 };
 
 /**
@@ -126,6 +128,7 @@ export function DemoCard3dTable({
   viewportScreenFlat = false,
   viewportFlatScale,
   hoverLift,
+  pointerTilt = true,
   position: positionP,
 }: DemoCard3dTableProps) {
   const c = state.cards[id];
@@ -157,7 +160,7 @@ export function DemoCard3dTable({
           : cardScaleById(id, state)
       }
       screenOverlay={viewportScreenFlat}
-      pointerTilt={!viewportScreenFlat}
+      pointerTilt={pointerTilt}
       {...(hoverLift !== undefined ? { hoverLift } : {})}
       faceUp={
         hideCardFace

@@ -15,6 +15,17 @@ function isCardFaceMesh(obj: unknown): obj is Mesh {
   );
 }
 
+/** Matches {@link Card} inner `AnimatedGroup` that applies pointer parallax (not tap `rotZ`). */
+export function resetCardPointerTiltGroup(cardRoot: Group): void {
+  cardRoot.traverse((o) => {
+    const ud = o.userData as Record<string, unknown> | undefined;
+    if (ud?.tcglCardPointerTiltGroup === true && o instanceof Group) {
+      o.rotation.x = 0;
+      o.rotation.y = 0;
+    }
+  });
+}
+
 /** Update shadow-map fade on face meshes (see {@link createCardFaceShadowDepthMaterial}). */
 export function setCardFaceShadowFade(cardRoot: Group, fade: number): void {
   cardRoot.traverse((obj) => {
@@ -76,6 +87,7 @@ export function convertCardFaceMaterialsHudToTable(cardRoot: Group): void {
     obj.castShadow = true;
   });
   setCardFaceShadowFade(cardRoot, 1);
+  resetCardPointerTiltGroup(cardRoot);
 }
 
 /**
@@ -89,6 +101,7 @@ export function convertCardFaceMaterialsTableToHud(cardRoot: Group): void {
     obj.castShadow = true;
   });
   setCardFaceShadowFade(cardRoot, 0);
+  resetCardPointerTiltGroup(cardRoot);
 }
 
 /** Lay-flat rig: matches JSX when `screenOverlay` is false (table). */

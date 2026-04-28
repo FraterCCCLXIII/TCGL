@@ -1,11 +1,13 @@
 import { useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import {
+  Children,
   useCallback,
   useMemo,
   useRef,
   cloneElement,
   isValidElement,
   type ReactElement,
+  type ReactNode,
 } from "react";
 import { Vector3, type Group, MathUtils } from "three";
 import { type FanOptions, cardFanLayout } from "../layout/fanLayout";
@@ -65,6 +67,63 @@ function moveInOrder<T>(arr: readonly T[], from: number, to: number): T[] {
 }
 
 type CardWithPointer = { onCardPointerDown?: (e: ThreeEvent<PointerEvent>) => void };
+
+/**
+ * Hosts often wrap the card in an extra `<group>` (mount ref, primitives). Reorder needs
+ * `onCardPointerDown` on the {@link Card} / table component — R3F hits the mesh, and {@link Card}
+ * stops propagation, so a handler on the outer group never runs.
+ */
+function mergeReorderOnCardPointerDown(
+  node: ReactElement,
+  onReorderPointerDown: (e: ThreeEvent<PointerEvent>) => void
+): ReactElement {
+  if (!isValidElement(node)) {
+    return node;
+  }
+  const t = node.type;
+  if (t === "group") {
+    const ch = (node.props as { children?: ReactNode }).children;
+    const kids = Children.toArray(ch).filter(isValidElement) as ReactElement[];
+    if (kids.length === 0) {
+      return node;
+    }
+    if (kids.length === 1 && isValidElement(kids[0])) {
+      return cloneElement(node, {
+        children: mergeReorderOnCardPointerDown(
+          kids[0] as ReactElement,
+          onReorderPointerDown
+        ),
+      } as Record<string, unknown>);
+    }
+    let merged = false;
+    const nextChildren = Children.map(ch, (child) => {
+      if (merged || !isValidElement(child)) {
+        return child;
+      }
+      if (child.type === "group") {
+        merged = true;
+        return mergeReorderOnCardPointerDown(child, onReorderPointerDown);
+      }
+      if (typeof child.type !== "string") {
+        merged = true;
+        return mergeReorderOnCardPointerDown(child, onReorderPointerDown);
+      }
+      return child;
+    });
+    return cloneElement(node, {
+      children: nextChildren,
+    } as Record<string, unknown>);
+  }
+
+  const props = node.props as CardWithPointer;
+  const prev = props.onCardPointerDown;
+  return cloneElement(node, {
+    onCardPointerDown: (e: ThreeEvent<PointerEvent>) => {
+      onReorderPointerDown(e);
+      prev?.(e);
+    },
+  } as Record<string, unknown>);
+}
 
 const POS_EPS = 0.0004;
 const ROT_EPS = 0.0003;
@@ -497,11 +556,8 @@ export function ReorderableCardFan({
     if (!isValidElement(el)) {
       return null;
     }
-    const next = cloneElement(el, {
-      onCardPointerDown: (ev: ThreeEvent<PointerEvent>) => {
-        onCardPointerDown(id, ev);
-        el.props.onCardPointerDown?.(ev);
-      },
+    const next = mergeReorderOnCardPointerDown(el, (ev) => {
+      onCardPointerDown(id, ev);
     });
     return (
       <group key={id} ref={setCardWrapRef(id)}>

@@ -1410,6 +1410,70 @@ export function App() {
     ]
   );
 
+  /** Same tap-to-return as {@link onFrontPlayCardPointerDown} for the far strip (no p1 strip drag). */
+  const onOpponentFrontPlayCardPointerDown = useCallback(
+    (e: ThreeEvent<PointerEvent>, fid: string) => {
+      if (
+        zoneFlight != null ||
+        stripPlaneDrag != null ||
+        handPlaneDrag != null ||
+        deckFlight != null
+      ) {
+        return;
+      }
+      const native = e.nativeEvent;
+      if (native.button !== 0) {
+        return;
+      }
+      const pid = native.pointerId;
+      const startX = native.clientX;
+      const startY = native.clientY;
+      let dragActivated = false;
+      let cleaned = false;
+
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pid) {
+          return;
+        }
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (dx * dx + dy * dy > 64) {
+          dragActivated = true;
+          cleanup();
+        }
+      };
+      const onEnd = (ev: PointerEvent) => {
+        if (ev.pointerId !== pid) {
+          return;
+        }
+        cleanup();
+        if (!dragActivated) {
+          returnOpponentFrontPlayToHand(fid);
+        }
+      };
+      const cap = true;
+      function cleanup() {
+        if (cleaned) {
+          return;
+        }
+        cleaned = true;
+        window.removeEventListener("pointermove", onMove, cap);
+        window.removeEventListener("pointerup", onEnd, cap);
+        window.removeEventListener("pointercancel", onEnd, cap);
+      }
+      window.addEventListener("pointermove", onMove, cap);
+      window.addEventListener("pointerup", onEnd, cap);
+      window.addEventListener("pointercancel", onEnd, cap);
+    },
+    [
+      deckFlight,
+      handPlaneDrag,
+      returnOpponentFrontPlayToHand,
+      stripPlaneDrag,
+      zoneFlight,
+    ]
+  );
+
   const onHandOrderChange = useCallback(
     (detail: { fromIndex: number; toIndex: number }) => {
       if (detail.fromIndex === detail.toIndex) {
@@ -1726,6 +1790,7 @@ export function App() {
                           oneHighlight={oneHighlight}
                           oneTapped={oneTapped}
                           viewportScreenFlat
+                          pointerTilt={false}
                           onCardDoubleClick={() => playHandToFrontPlay(hid)}
                         />
                       )}
@@ -1772,6 +1837,7 @@ export function App() {
                           oneHighlight={oneHighlight}
                           oneTapped={oneTapped}
                           viewportScreenFlat
+                          pointerTilt={false}
                           viewportFlatScale={VIEWPORT_HAND_SCALE_OPPONENT}
                           hoverLift={VIEWPORT_HAND_HOVER_LIFT_OPPONENT}
                           hideCardFace
@@ -1821,7 +1887,12 @@ export function App() {
                       position={fpOffsets[fid] ?? [0, 0, 0]}
                     >
                       {stripPrimitiveIds.has(fid) ? (
-                        <primitive object={cardGroupById.current.get(fid)!} />
+                        <primitive
+                          object={cardGroupById.current.get(fid)!}
+                          onPointerDown={(e) =>
+                            onFrontPlayCardPointerDown(e, fid)
+                          }
+                        />
                       ) : visibleFpIds.includes(fid) ? (
                         <DemoCard3dTable
                           id={fid}
@@ -1837,6 +1908,7 @@ export function App() {
                             onFrontPlayCardPointerDown(e, fid)
                           }
                           onCardDoubleClick={() => returnFrontPlayToHand(fid)}
+                          pointerTilt={false}
                         />
                       ) : null}
                     </group>
@@ -1932,6 +2004,7 @@ export function App() {
                     oneHighlight={false}
                     oneTapped={false}
                     pickDisabled
+                    pointerTilt={false}
                   />
                 </GhostFollowGroup>
               ) : null}
@@ -1953,6 +2026,7 @@ export function App() {
                     oneHighlight={false}
                     oneTapped={false}
                     pickDisabled
+                    pointerTilt={false}
                   />
                 </GhostFollowGroup>
               ) : null}
@@ -1979,7 +2053,12 @@ export function App() {
                       position={fpOffsetsP2[fid] ?? [0, 0, 0]}
                     >
                       {stripPrimitiveIds.has(fid) ? (
-                        <primitive object={cardGroupById.current.get(fid)!} />
+                        <primitive
+                          object={cardGroupById.current.get(fid)!}
+                          onPointerDown={(e) =>
+                            onOpponentFrontPlayCardPointerDown(e, fid)
+                          }
+                        />
                       ) : visibleFpIdsP2.includes(fid) ? (
                         <DemoCard3dTable
                           id={fid}
@@ -1992,9 +2071,13 @@ export function App() {
                           oneHighlight={oneHighlight}
                           oneTapped={oneTapped}
                           opponentReadableOrientation
+                          onCardPointerDown={(e) =>
+                            onOpponentFrontPlayCardPointerDown(e, fid)
+                          }
                           onCardDoubleClick={() =>
                             returnOpponentFrontPlayToHand(fid)
                           }
+                          pointerTilt={false}
                         />
                       ) : null}
                     </group>
